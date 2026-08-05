@@ -36,7 +36,7 @@ function validateBuildConfig() {
   if (!/^[a-z0-9][a-z0-9.-]{0,80}$/.test(buildConfig.name)) {
     throw new Error(`Invalid package/artifact name: ${buildConfig.name}`);
   }
-  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(buildConfig.version)) {
+  if (!/^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(buildConfig.version)) {
     throw new Error(`Invalid semantic version: ${buildConfig.version}`);
   }
   if (!Array.isArray(buildConfig.extensionFiles) || !buildConfig.extensionFiles.length) {

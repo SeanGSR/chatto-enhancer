@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.11.1 - Unreleased
+## 1.0 - Unreleased
 
 - Preserved existing Chatto Enhancer features.
 - Added dependency-free build, check, and packaging scripts.
