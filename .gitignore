@@ -13,6 +13,7 @@ artifacts/
 *.pfx
 .env
 .env.*
+!.env.example
 
 .vscode/
 .idea/

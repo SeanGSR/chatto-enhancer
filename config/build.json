@@ -3,12 +3,14 @@
   "version": "1.0",
   "extensionFiles": [
     "manifest.json",
+    "background.js",
     "main-world.js",
     "emoji-data.js",
     "content/index.js",
     "styles.css"
   ],
   "sourceFiles": {
+    "background.js": "src/background.js",
     "main-world.js": "src/main-world.js",
     "emoji-data.js": "src/generated/emoji-data.js",
     "content/index.js": "src/content/index.js",

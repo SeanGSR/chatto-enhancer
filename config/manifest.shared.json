@@ -6,6 +6,13 @@
   "permissions": [
     "storage"
   ],
+  "host_permissions": [
+    "https://api.giphy.com/*",
+    "https://*.giphy.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "chatto-enhancer@local.extension",

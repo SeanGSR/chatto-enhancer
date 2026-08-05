@@ -104,6 +104,45 @@
     return out;
   }
 
+  const MAX_GIF_FAVORITES = 200;
+
+  /** Favorited GIFs are rendered as <img src> directly from stored data,
+      without going through background.js's fetch relay the way inserting
+      one does — so this is the only gate on what URL ends up in an <img>
+      built from storage. Low severity either way (an <img> src can't
+      execute script), but cheap to restrict to Giphy's own media hosts,
+      consistent with how background.js already restricts its fetch relay. */
+  function isGiphyMediaUrl(value) {
+    if (typeof value !== 'string' || !value || value.length > 2048) return false;
+    let url;
+    try { url = new URL(value); } catch (_) { return false; }
+    return url.protocol === 'https:' && /(^|\.)giphy\.com$/.test(url.hostname);
+  }
+
+  function cleanGifFavorite(item) {
+    if (!item || typeof item !== 'object') return null;
+    const id = typeof item.id === 'string' && item.id && item.id.length <= 64 ? item.id : null;
+    if (!id || !isGiphyMediaUrl(item.url)) return null;
+    const previewUrl = isGiphyMediaUrl(item.previewUrl) ? item.previewUrl : item.url;
+    const title = typeof item.title === 'string' ? item.title.slice(0, 200) : '';
+    const dim = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 20000 ? v : 0);
+    return { id, url: item.url, previewUrl, title, width: dim(item.width), height: dim(item.height) };
+  }
+
+  function cleanGifFavorites(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of value) {
+      const item = cleanGifFavorite(raw);
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
+      out.push(item);
+      if (out.length >= MAX_GIF_FAVORITES) break;
+    }
+    return out;
+  }
+
   /* Storage that cannot wedge startup.
      Firefox refuses storage.local outright when an add-on is loaded
      temporarily without an explicit ID in browser_specific_settings — the
@@ -151,6 +190,31 @@
     } catch (_) {
       /* extension context can go away on reload; nothing to do */
     }
+  }
+
+  /** Talks to background.js, which is where anything Giphy-related actually
+      happens — a content script's fetch() is bound by the page's own CSP,
+      the background script's is not. Never rejects: callers get { ok:false }
+      instead, since "the extension context went away mid-reload" is routine,
+      not exceptional. */
+  function sendBg(msg) {
+    return new Promise((resolve) => {
+      try {
+        if (PROMISE_API) {
+          API.runtime.sendMessage(msg).then(
+            (r) => resolve(r || { ok: false, error: 'no-response' }),
+            () => resolve({ ok: false, error: 'unreachable' }),
+          );
+        } else {
+          API.runtime.sendMessage(msg, (r) => {
+            if (API.runtime.lastError) { resolve({ ok: false, error: 'unreachable' }); return; }
+            resolve(r || { ok: false, error: 'no-response' });
+          });
+        }
+      } catch (_) {
+        resolve({ ok: false, error: 'unreachable' });
+      }
+    });
   }
 
   storageGet(['volumes', 'recents']).then((r) => {
@@ -444,9 +508,23 @@
     });
   }
 
-  /** Our own display name, so we don't put a volume slider on our own card. */
+  /** Our own display name, so we don't put a volume slider on our own card.
+      Confirmed against the account panel Chatto renders in the channel
+      sidebar (also [data-testid="current-user-identity-text"], reused for
+      the in-call "you are" label): the name lives in a plain inner span,
+      one level deeper than a sibling span that optionally carries a custom
+      status emoji + tooltip. Reading the outer wrapper's combined
+      textContent (the old 'testid-child' strategy) swept up that status
+      emoji along with the name — that was the actual cause of local-card
+      detection permanently failing on live Chatto, not a loading race. */
   function localUserName() {
     return cached('me', () => resolveOne('me', [
+      ['testid-name-span', () => {
+        const el = qs('[data-testid="current-user-identity-text"]');
+        const nameSpan = el && el.firstElementChild && el.firstElementChild.firstElementChild;
+        const text = nameSpan && nameSpan.textContent.trim();
+        return text || null;
+      }],
       ['testid-child', () => {
         const el = qs('[data-testid="current-user-identity-text"]');
         const first = el && el.firstElementChild;
@@ -463,15 +541,33 @@
     ]));
   }
 
+  /** Chatto decorates the "this is you" sidebar label (the element matched
+      by localUserName()) with a trailing decorative emoji that never appears
+      on the participant card itself — confirmed against a live call, where
+      the card's title/text stayed the plain display name for the whole
+      session while the sidebar consistently carried an emoji suffix.
+      Comparing the two strings as-is therefore never matches, not just
+      during an initial loading race. Stripping a trailing run of whitespace
+      and pictographic characters before comparing recovers the plain name
+      on both sides. */
+  function stripTrailingDecoration(s) {
+    return typeof s === 'string'
+      ? s.replace(/[\s\u{FE0F}\u{200D}\p{Extended_Pictographic}]+$/gu, '')
+      : s;
+  }
+
   /** Is this the local participant's own card?
       Checked in order of how much we trust the signal:
       1. An explicit marker Chatto puts on the card itself.
       2. A stable participant id shared with whichever card carries that
          marker (covers the case where the marker lands on a wrapper rather
          than the card returned by findCards()).
-      3. Display name, matched against localUserName() — the only option
-         left when Chatto exposes no id or marker, and unreliable if two
-         participants share a name (see SECURITY-REVIEW.md). */
+      3. Display name, matched against localUserName() after stripping the
+         sidebar's decorative suffix — the only option left when Chatto
+         exposes no id or marker on the card at all (confirmed live: this
+         build's participant cards carry no data-local, data-local-
+         participant, or any participant-id attribute), and still unreliable
+         if two participants share a name (see SECURITY-REVIEW.md). */
   function isLocalCard(card) {
     if (card.getAttribute('data-local') === 'true' ||
         card.getAttribute('data-local-participant') === 'true') return true;
@@ -488,7 +584,8 @@
     }
 
     const me = localUserName();
-    return !!me && nameOf(card) === me;
+    if (!me) return false;
+    return stripTrailingDecoration(nameOf(card)) === stripTrailingDecoration(me);
   }
 
   /** Remove a slider that no longer belongs — either the card just resolved
@@ -1438,9 +1535,380 @@
   }
 
   /* =========================================================================
+     PART 2b — GIF PICKER
+
+     Searches Giphy (via background.js — see the comment there for why a
+     content script can't just fetch() this itself) and, on pick, uploads
+     the GIF as a real file rather than pasting its URL as text. Chatto
+     evidently doesn't animate a bare GIF link (confirmed by hand: a link
+     sits static, an uploaded .gif file plays), so a link would just
+     reproduce that limitation. Insertion goes through the same synthetic
+     paste technique writeText() already uses for text — a DataTransfer
+     carrying a File dispatched as a 'paste' ClipboardEvent — on the working
+     assumption that Chatto's composer treats a pasted image as an upload
+     the same way most chat apps do. That assumption is the one part of this
+     feature not confirmed against the live app; if it doesn't upload,
+     that's the first thing to check.
+     ========================================================================= */
+
+  let gifPicker = null;
+  let gifPickerFor = null;
+  let gifNextOffset = null;
+  let gifQuery = '';
+  let gifSearchSeq = 0;
+  let gifTab = 'search'; // 'search' | 'favorites'
+
+  let gifFavorites = [];
+  storageGet(['gifFavorites']).then((r) => {
+    gifFavorites = cleanGifFavorites(r && r.gifFavorites);
+  });
+
+  function isGifFavorited(id) {
+    return gifFavorites.some((f) => f.id === id);
+  }
+
+  function toggleGifFavorite(result) {
+    const clean = cleanGifFavorite(result);
+    if (!clean) return isGifFavorited(result && result.id);
+    const i = gifFavorites.findIndex((f) => f.id === clean.id);
+    if (i >= 0) {
+      gifFavorites.splice(i, 1);
+    } else {
+      gifFavorites.unshift(clean);
+      if (gifFavorites.length > MAX_GIF_FAVORITES) gifFavorites.length = MAX_GIF_FAVORITES;
+    }
+    storageSet({ gifFavorites });
+    return i < 0; // true if it just became a favorite
+  }
+
+  /* Feather Icons' "image" glyph (MIT license, feathericons.com) — reused
+     as-is rather than hand-drawn, and kept to this codebase's existing
+     stroke-icon convention (currentColor, no fill) so it matches every
+     other icon in the toolbar. */
+  function gifIcon() {
+    const svg = svgEl('svg', {
+      viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+      'stroke-width': '1.7', 'stroke-linecap': 'round',
+      'stroke-linejoin': 'round', 'aria-hidden': 'true',
+    });
+    svg.appendChild(svgEl('rect', { x: '3', y: '3', width: '18', height: '18', rx: '2', ry: '2' }));
+    svg.appendChild(svgEl('circle', { cx: '8.5', cy: '8.5', r: '1.5' }));
+    svg.appendChild(svgEl('polyline', { points: '21 15 16 10 5 21' }));
+    return svg;
+  }
+
+  function makeGifButton() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ce-gif-btn';
+    btn.title = 'GIF';
+    btn.setAttribute('aria-label', 'Insert GIF');
+    btn.appendChild(gifIcon());
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleGifPicker(btn);
+    });
+    return btn;
+  }
+
+  /** One button per composer, docked right beside that composer's emoji
+      button — mirrors addEmojiButton() exactly, including its cleanup and
+      float-as-last-resort behavior. */
+  function addGifButton() {
+    const inputs = findInputs();
+    const live = new Set(inputs.map(cidOf));
+
+    qsa('.ce-gif-btn').forEach((b) => {
+      if (!b.isConnected || !live.has(b.dataset.ceFor)) b.remove();
+    });
+
+    for (const inp of inputs) {
+      const cid = cidOf(inp);
+      const existing = qsa('.ce-gif-btn').find((b) => b.dataset.ceFor === cid);
+      if (existing && existing.isConnected) continue;
+
+      const btn = makeGifButton();
+      btn.dataset.ceFor = cid;
+      const emojiBtn = qsa('.ce-emoji-btn').find((b) => b.dataset.ceFor === cid);
+
+      if (emojiBtn && emojiBtn.parentElement) {
+        emojiBtn.parentElement.insertBefore(btn, emojiBtn);
+        continue;
+      }
+
+      const sendBtn = findSendButton(inp);
+      if (sendBtn && sendBtn.parentElement) {
+        sendBtn.parentElement.insertBefore(btn, sendBtn);
+        continue;
+      }
+
+      const composer = findComposer(inp);
+      if (!composer) continue;
+      composer.classList.add('ce-composer');
+      btn.classList.add('ce-emoji-float');
+      composer.appendChild(btn);
+    }
+  }
+
+  function buildGifPicker() {
+    const tabSearch = h('button', {
+      type: 'button', class: 'ce-tab ce-gif-tab ce-tab-on', text: 'GIFs',
+    });
+    const tabFavorites = h('button', {
+      type: 'button', class: 'ce-tab ce-gif-tab', text: '★ Favorites',
+    });
+    const tabs = h('div', { class: 'ce-pick-tabs ce-gif-tabs' }, [tabSearch, tabFavorites]);
+
+    const search = h('input', {
+      type: 'text', placeholder: 'Search GIPHY', spellcheck: 'false', class: 'ce-gif-search',
+    });
+    const body = h('div', { class: 'ce-pick-body ce-gif-body' });
+
+    const el = h('div', { class: 'ce-pick ce-gif-pick', role: 'dialog', 'aria-label': 'GIF picker' }, [
+      tabs,
+      h('div', { class: 'ce-pick-search' }, [search]),
+      body,
+    ]);
+
+    function starButton(r) {
+      const star = h('button', {
+        type: 'button', class: 'ce-gif-star' + (isGifFavorited(r.id) ? ' ce-gif-star-on' : ''),
+        title: 'Favorite', 'aria-label': 'Toggle favorite', text: '★',
+      });
+      star.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+      star.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const nowFavorited = toggleGifFavorite(r);
+        star.classList.toggle('ce-gif-star-on', nowFavorited);
+        // Un-favoriting while looking at the Favorites tab should drop the
+        // tile immediately rather than leave a favorite-less item in a list
+        // that is, by definition, only ever the favorited ones.
+        if (!nowFavorited && gifTab === 'favorites') star.closest('.ce-gif-item').remove();
+      });
+      return star;
+    }
+
+    function gifTile(r) {
+      const btn = h('button', {
+        type: 'button', class: 'ce-gif-item', title: r.title || 'GIF',
+        'aria-label': r.title || 'Insert GIF',
+      });
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = r.previewUrl;
+      img.alt = r.title || '';
+      btn.appendChild(img);
+      btn.appendChild(starButton(r));
+      btn.dataset.url = r.url;
+      btn.__ceGif = r;
+      return btn;
+    }
+
+    function renderResults(results, append) {
+      const grid = append && body.querySelector('.ce-gif-grid')
+        ? body.querySelector('.ce-gif-grid')
+        : h('div', { class: 'ce-gif-grid' });
+      for (const r of results) grid.appendChild(gifTile(r));
+      if (!append) body.replaceChildren(grid);
+      else if (!body.contains(grid)) body.appendChild(grid);
+    }
+
+    let loadingMore = false;
+    async function loadMore() {
+      if (gifTab !== 'search' || loadingMore || gifNextOffset === null) return;
+      loadingMore = true;
+      const seq = gifSearchSeq;
+      const r = await sendBg({ type: 'gif-search', query: gifQuery, offset: gifNextOffset });
+      loadingMore = false;
+      if (seq !== gifSearchSeq || !r.ok) return;
+      gifNextOffset = typeof r.nextOffset === 'number' ? r.nextOffset : null;
+      renderResults(r.results, true);
+    }
+
+    async function runSearch(q) {
+      gifQuery = q;
+      const seq = ++gifSearchSeq;
+      body.replaceChildren(h('div', { class: 'ce-pick-empty', text: 'Loading…' }));
+      const r = await sendBg({ type: 'gif-search', query: q });
+      if (seq !== gifSearchSeq) return;
+      if (!r.ok) {
+        const msg = r.error === 'no-key' || r.error === 'bad-key'
+          ? 'GIF search isn’t configured for this build.'
+          : 'GIF search is unavailable right now.';
+        body.replaceChildren(h('div', { class: 'ce-pick-empty', text: msg }));
+        return;
+      }
+      gifNextOffset = typeof r.nextOffset === 'number' ? r.nextOffset : null;
+      if (!r.results.length) {
+        body.replaceChildren(h('div', { class: 'ce-pick-empty', text: 'No GIFs matched that search.' }));
+        return;
+      }
+      renderResults(r.results, false);
+    }
+
+    function renderFavorites(q) {
+      const list = q
+        ? gifFavorites.filter((f) => f.title.toLowerCase().includes(q.toLowerCase()))
+        : gifFavorites;
+      if (!list.length) {
+        body.replaceChildren(h('div', {
+          class: 'ce-pick-empty',
+          text: gifFavorites.length ? 'No favorites match that search.' : 'No favorites yet — click the star on any GIF to save it here.',
+        }));
+        return;
+      }
+      renderResults(list, false);
+    }
+
+    function setTab(tab) {
+      gifTab = tab;
+      tabSearch.classList.toggle('ce-tab-on', tab === 'search');
+      tabFavorites.classList.toggle('ce-tab-on', tab === 'favorites');
+      search.placeholder = tab === 'search' ? 'Search GIPHY' : 'Filter favorites';
+      if (tab === 'search') runSearch(search.value.trim());
+      else renderFavorites(search.value.trim());
+    }
+
+    body.addEventListener('scroll', () => {
+      if (body.scrollTop + body.clientHeight > body.scrollHeight - 200) loadMore();
+    });
+
+    body.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.ce-gif-item')) e.preventDefault();
+    });
+
+    body.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ce-gif-item');
+      if (!btn) return;
+      insertGif(btn.dataset.url, btn);
+    });
+
+    let searchTimer = null;
+    search.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = search.value.trim();
+      searchTimer = setTimeout(() => {
+        if (gifTab === 'search') runSearch(q);
+        else renderFavorites(q);
+      }, 250);
+    });
+
+    tabSearch.addEventListener('mousedown', (e) => e.preventDefault());
+    tabFavorites.addEventListener('mousedown', (e) => e.preventDefault());
+    tabSearch.addEventListener('click', () => setTab('search'));
+    tabFavorites.addEventListener('click', () => setTab('favorites'));
+
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); closeGifPicker(); }
+    });
+
+    el.__ceSearch = search;
+    setTab('search');
+
+    return el;
+  }
+
+  function placeGif(btn) {
+    if (!gifPicker) return;
+    const r = btn.getBoundingClientRect();
+    const w = gifPicker.offsetWidth || 320;
+    const hgt = gifPicker.offsetHeight || 380;
+    let left = Math.min(r.right - w, window.innerWidth - w - 10);
+    left = Math.max(10, left);
+    let top = r.top - hgt - 8;
+    if (top < 10) top = Math.min(r.bottom + 8, window.innerHeight - hgt - 10);
+    gifPicker.style.left = left + 'px';
+    gifPicker.style.top = Math.max(10, top) + 'px';
+  }
+
+  function closeGifPicker() {
+    gifPickerFor = null;
+    if (!gifPicker) return;
+    gifPicker.remove();
+    gifPicker = null;
+    document.querySelectorAll('.ce-gif-btn').forEach((b) => b.classList.remove('ce-open'));
+    document.removeEventListener('mousedown', onGifDocDown, true);
+    window.removeEventListener('resize', onGifReflow, true);
+    window.removeEventListener('scroll', onGifReflow, true);
+  }
+
+  function onGifDocDown(e) {
+    if (gifPicker && !gifPicker.contains(e.target) && !e.target.closest('.ce-gif-btn')) closeGifPicker();
+  }
+
+  function onGifReflow() {
+    const btn = document.querySelector('.ce-gif-btn.ce-open');
+    if (btn) placeGif(btn);
+  }
+
+  function toggleGifPicker(btn) {
+    if (gifPicker) { closeGifPicker(); return; }
+    gifPickerFor = btn.dataset.ceFor || null;
+    gifPicker = buildGifPicker();
+    document.body.appendChild(gifPicker);
+    btn.classList.add('ce-open');
+    placeGif(btn);
+    if (gifPicker.__ceSearch) gifPicker.__ceSearch.focus();
+    document.addEventListener('mousedown', onGifDocDown, true);
+    window.addEventListener('resize', onGifReflow, true);
+    window.addEventListener('scroll', onGifReflow, true);
+  }
+
+  function base64ToBytes(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  async function insertGif(url, btn) {
+    const inputs = findInputs();
+    const inp = inputs.find((el) => cidOf(el) === gifPickerFor) || findInput();
+    if (!inp || !url) return;
+
+    if (btn) btn.classList.add('ce-gif-loading');
+    const r = await sendBg({ type: 'gif-fetch', url });
+    if (btn) btn.classList.remove('ce-gif-loading');
+    if (!r.ok) {
+      warn('could not fetch that GIF (' + r.error + ') — nothing inserted.');
+      return;
+    }
+
+    let file;
+    try {
+      const bytes = base64ToBytes(r.base64);
+      file = new File([bytes], 'giphy.gif', { type: r.type || 'image/gif' });
+    } catch (_) {
+      warn('could not build a file from the fetched GIF — nothing inserted.');
+      return;
+    }
+
+    closeGifPicker();
+    inp.focus();
+
+    let ok = false;
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      ok = !inp.dispatchEvent(new ClipboardEvent('paste', {
+        clipboardData: dt, bubbles: true, cancelable: true,
+      }));
+    } catch (_) { ok = false; }
+
+    if (!ok) warn('pasting the GIF into the composer did not seem to work — ' +
+                   'this may be a Chatto limitation rather than an extension bug.');
+  }
+
+  /* =========================================================================
      PART 3 — MARKDOWN TOOLBAR
 
-     Select text in the composer and a bar appears above it.
+     A toolbar is docked directly above each composer, always visible —
+     like a native app's formatting bar, not a popup tied to the selection.
+     Select text (or just place the caret) and click a button, or use its
+     shortcut, to apply a format.
 
      The format set below matches what Chatto actually renders, confirmed by
      pasting a full markdown syntax guide into a message and reading back what
@@ -1832,7 +2300,6 @@
 
     if (p.ok) {
       if (p.active) paintActive(p.active);
-      scheduleBar();
       return;
     }
     /* The command could not run. Remember why, so the same format goes
@@ -2053,7 +2520,14 @@
     applyFormat(f);
     return 'applied ' + id;
   };
-  let mdBar = null;
+  /* Docked, always-visible toolbar — one per composer, sitting directly above
+     its text box like a native app's formatting bar, rather than a popup that
+     appears and disappears with the selection. This sidesteps the class of
+     bug a floating/selection-anchored bar has: there is nothing left to hide
+     when a drag's mouseup lands outside the composer, because visibility no
+     longer depends on the live selection at all. Formatting itself still
+     goes through the selection Chatto's editor tracks (unchanged), the same
+     way a native toolbar button would. */
 
   function buildBar() {
     const el = h('div', { class: 'ce-md', role: 'toolbar', 'aria-label': 'Text formatting' });
@@ -2072,64 +2546,59 @@
         e.preventDefault();
         e.stopPropagation();
         applyFormat(f);
-        scheduleBar();   // stay open on the re-selected text
       });
       el.appendChild(b);
     }
     return el;
   }
 
-  function placeBar(rect) {
-    const w = mdBar.offsetWidth || 300;
-    const bh = mdBar.offsetHeight || 34;
-    let left = rect.left + rect.width / 2 - w / 2;
-    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-    let top = rect.top - bh - 8;
-    if (top < 8) top = Math.min(rect.bottom + 8, window.innerHeight - bh - 8);
-    mdBar.style.left = left + 'px';
-    mdBar.style.top = Math.max(8, top) + 'px';
-  }
+  /** Creates or drops one docked bar per composer, and keeps each one
+      anchored directly above its composer's own box — mirrors how
+      addEmojiButton() manages one button per composer. */
+  function ensureMdBar() {
+    const inputs = findInputs();
+    const live = new Set(inputs.map(cidOf));
 
-  function hideBar() {
-    if (!mdBar) return;
-    mdBar.remove();
-    mdBar = null;
-  }
+    // Drop bars whose composer is gone (thread closed, view swapped).
+    qsa('.ce-md').forEach((bar) => {
+      if (!bar.isConnected || !live.has(bar.dataset.ceFor)) bar.remove();
+    });
 
-  function updateBar() {
-    const inp = findInput();
-    const sel = window.getSelection();
-    const live = inp && sel && sel.rangeCount && !sel.isCollapsed &&
-                 inp.contains(sel.anchorNode) && sel.toString().trim().length > 0;
-    if (!live) { hideBar(); return; }
+    for (const inp of inputs) {
+      const cid = cidOf(inp);
+      const existing = qsa('.ce-md').find((b) => b.dataset.ceFor === cid);
+      if (existing && existing.isConnected) continue;
 
-    let rect = sel.getRangeAt(0).getBoundingClientRect();
-    if (!rect || (!rect.width && !rect.height)) {
-      // Some selections measure zero — one ending exactly on a line break, for
-      // example. Anchor to the composer instead of dropping the bar.
-      rect = inp.getBoundingClientRect();
-      if (!rect.width && !rect.height) { hideBar(); return; }
-    }
+      const bar = buildBar();
+      bar.dataset.ceFor = cid;
 
-    if (!mdBar) {
-      mdBar = buildBar();
-      document.body.appendChild(mdBar);
-    }
-    placeBar(rect);
-
-    // Light up the buttons for formats already applied at the selection.
-    // Only the real editor can answer that; the fallback path shows no state.
-    if (mdBridge.editor) {
-      markTarget(inp);
-      send('md-state', {});
+      const composer = findComposer(inp);
+      if (composer && composer.parentElement) {
+        composer.parentElement.insertBefore(bar, composer);
+      } else if (composer) {
+        composer.insertBefore(bar, composer.firstChild);
+        warn('markdown toolbar has no composer parent to dock above; ' +
+             'placed inside the composer instead. Run __ceDebug() if it looks wrong.');
+      } else {
+        continue; // no anchor at all — try again next scan
+      }
     }
   }
 
-  /** Toggle the pressed look on toolbar buttons from a bridge state report. */
+  function removeMdBars() {
+    qsa('.ce-md').forEach((bar) => bar.remove());
+  }
+
+  /** Toggle the pressed look on toolbar buttons from a bridge state report.
+      Targets the bar for whichever composer was just marked/queried
+      (markTarget()), since the bridge only tracks one target at a time. */
   function paintActive(active) {
-    if (!mdBar || !active) return;
+    if (!active) return;
+    const target = qs('[data-ce-md-target="1"]');
+    const bar = target && qsa('.ce-md').find((b) => b.dataset.ceFor === cidOf(target));
+    if (!bar) return;
     for (const f of FORMATS) {
-      const b = mdBar.querySelector('.ce-md-' + f.id);
+      const b = bar.querySelector('.ce-md-' + f.id);
       if (b) {
         b.classList.toggle('ce-on', !!active[f.id]);
         b.setAttribute('aria-pressed', active[f.id] ? 'true' : 'false');
@@ -2137,21 +2606,27 @@
     }
   }
 
-  /* Coalesce to one update per frame. The timeout is not redundant: rAF is
-     frozen in a background tab, and without it a single scheduleBar() call
-     made just before the tab is hidden would leave barFrame stuck and the
-     toolbar permanently unresponsive after returning. */
-  let barFrame = 0;
-  function scheduleBar() {
-    if (barFrame) return;
-    const run = () => { clearTimeout(barFrame); barFrame = 0; updateBar(); };
-    barFrame = setTimeout(run, 120);
+  /* Coalesce active-state queries to one per frame, same reasoning as the
+     rest of the file's scan scheduling: rAF alone freezes in a background
+     tab, so the timeout is the fallback that keeps this from ever getting
+     stuck. Only asks the page for state; never affects bar visibility. */
+  let mdStateFrame = 0;
+  function scheduleActiveState() {
+    if (mdStateFrame) return;
+    const run = () => {
+      clearTimeout(mdStateFrame);
+      mdStateFrame = 0;
+      if (!mdBridge.editor) return;
+      const inp = findInput();
+      if (!inp) return;
+      markTarget(inp);
+      send('md-state', {});
+    };
+    mdStateFrame = setTimeout(run, 120);
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
   }
 
-  document.addEventListener('selectionchange', scheduleBar);
-  window.addEventListener('scroll', scheduleBar, true);
-  window.addEventListener('resize', scheduleBar);
+  document.addEventListener('selectionchange', scheduleActiveState);
 
   /* Capture phase so these beat both Chatto's own handlers and the browser's
      defaults — Ctrl+B opens the bookmarks sidebar in Firefox and Ctrl+K jumps
@@ -2168,12 +2643,7 @@
     e.preventDefault();
     e.stopPropagation();
     applyFormat(fmt);
-    scheduleBar();
   }, true);
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') hideBar();
-  });
 
   /* =========================================================================
      WIRING
@@ -2268,9 +2738,10 @@
       audioIds = [];
     }
     addEmojiButton();
+    addGifButton();
     syncTheme();
     mdQueryMaybe();
-    if (mdBar && !findInput()) hideBar();
+    ensureMdBar();
   }
 
   /* One scan per animation frame at most, rather than a 60 ms timer per
@@ -2295,10 +2766,11 @@
   function cleanup() {
     try { clearInterval(scanInterval); } catch (_) {}
     try { clearTimeout(saveTimer); } catch (_) {}
-    try { clearTimeout(barFrame); } catch (_) {}
+    try { clearTimeout(mdStateFrame); } catch (_) {}
     try { mo.disconnect(); } catch (_) {}
     try { closePicker(); } catch (_) {}
-    try { hideBar(); } catch (_) {}
+    try { closeGifPicker(); } catch (_) {}
+    try { removeMdBars(); } catch (_) {}
     try { document.documentElement.classList.remove(DRAG_CLASS); } catch (_) {}
   }
 
@@ -2333,7 +2805,7 @@
      test/local-card-detection.test.mjs against a minimal DOM shim. */
   window.__ceLocalCardTestHooks = {
     isLocalCard, nameOf, localUserName, remoteCards, findCards,
-    addSlider, removeSlider, dropCache, inCall,
+    addSlider, removeSlider, dropCache, inCall, stripTrailingDecoration,
   };
   window.__ceDebug = function () {
     window.__ceDebugOn = !window.__ceDebugOn;
