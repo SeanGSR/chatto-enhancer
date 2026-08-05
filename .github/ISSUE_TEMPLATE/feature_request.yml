@@ -1,0 +1,33 @@
+name: Feature Request
+description: Suggest an improvement for Chatto Enhancer
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or limitation should this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser Family
+      options:
+        - Chromium
+        - Firefox
+        - Both
+    validations:
+      required: true

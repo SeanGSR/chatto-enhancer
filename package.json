@@ -1,0 +1,16 @@
+{
+  "name": "chatto-enhancer",
+  "version": "1.11.1",
+  "description": "Cross-browser extension adding per-person volume sliders, emoji picker, and markdown controls to Chatto.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

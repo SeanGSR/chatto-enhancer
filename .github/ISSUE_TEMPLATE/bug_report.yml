@@ -1,0 +1,49 @@
+name: Bug Report
+description: Report a problem with Chatto Enhancer
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Browser name and version.
+      placeholder: "Chrome 127, Firefox 140, Brave 1.68"
+    validations:
+      required: true
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension Version
+      placeholder: "1.11.1"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      placeholder: |
+        1. Open Chatto
+        2. Join a call
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console Output
+      description: Include relevant Chatto Enhancer console output. Do not include secrets or private messages.
+      render: text

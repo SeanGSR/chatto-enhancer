@@ -1,0 +1,22 @@
+{
+  "name": "chatto-enhancer",
+  "version": "1.11.1",
+  "extensionFiles": [
+    "manifest.json",
+    "main-world.js",
+    "emoji-data.js",
+    "content/index.js",
+    "styles.css"
+  ],
+  "sourceFiles": {
+    "main-world.js": "src/main-world.js",
+    "emoji-data.js": "src/generated/emoji-data.js",
+    "content/index.js": "src/content/index.js",
+    "styles.css": "src/styles.css"
+  },
+  "hostMatches": [
+    "https://chat.chatto.run/*",
+    "https://chatto.pixel-box.net/*"
+  ],
+  "geckoId": "chatto-enhancer@local.extension"
+}
