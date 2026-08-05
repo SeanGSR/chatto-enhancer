@@ -32,12 +32,6 @@ This is an unofficial, community-made extension built for [Chatto](https://githu
 - The GIF picker sends search queries and fetches images from Giphy (`api.giphy.com`) when you use it — no other runtime network requests are made
 - Preferences and favorited GIFs are stored locally using the browser storage API
 
-## Supported Servers
-
-Chatto Enhancer is designed for Chatto.
-
-Chatto is self-hosted, so the extension can be configured to work with any Chatto installation by updating the extension's host permissions before building.
-
 ## Installation
 
 ### Chromium
