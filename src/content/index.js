@@ -463,6 +463,42 @@
     ]));
   }
 
+  /** Is this the local participant's own card?
+      Checked in order of how much we trust the signal:
+      1. An explicit marker Chatto puts on the card itself.
+      2. A stable participant id shared with whichever card carries that
+         marker (covers the case where the marker lands on a wrapper rather
+         than the card returned by findCards()).
+      3. Display name, matched against localUserName() — the only option
+         left when Chatto exposes no id or marker, and unreliable if two
+         participants share a name (see SECURITY-REVIEW.md). */
+  function isLocalCard(card) {
+    if (card.getAttribute('data-local') === 'true' ||
+        card.getAttribute('data-local-participant') === 'true') return true;
+
+    const marker = qs('[data-testid="call-participant-card"][data-local="true"], [data-local-participant="true"]');
+    if (marker && marker !== card) {
+      const markerId = marker.getAttribute('data-call-participant-id') ||
+                        marker.getAttribute('data-participant-id') ||
+                        marker.getAttribute('data-participant-identity');
+      const cardId = card.getAttribute('data-call-participant-id') ||
+                     card.getAttribute('data-participant-id') ||
+                     card.getAttribute('data-participant-identity');
+      if (markerId && cardId) return markerId === cardId;
+    }
+
+    const me = localUserName();
+    return !!me && nameOf(card) === me;
+  }
+
+  /** Remove a slider that no longer belongs — either the card just resolved
+      as local, or it's gone through a re-render and needs re-creating. */
+  function removeSlider(card) {
+    const wrap = card.querySelector('.ce-vol');
+    if (wrap) wrap.remove();
+    card.classList.remove('ce-card');
+  }
+
   function nameOf(card) {
     const t = (card.getAttribute('title') || '').trim();
     if (t) return t;
@@ -708,8 +744,7 @@
 
   /** Remote participant cards, in DOM order, excluding ourselves. */
   function remoteCards() {
-    const me = localUserName();
-    return findCards().filter((c) => nameOf(c) !== me);
+    return findCards().filter((c) => !isLocalCard(c));
   }
 
   function remap() {
@@ -819,9 +854,9 @@
   }
 
   function addSlider(card) {
+    if (isLocalCard(card)) { removeSlider(card); return; } // that's us
     if (card.querySelector('.ce-vol')) return;
     if (!inCall()) return;                        // not joined yet
-    if (nameOf(card) === localUserName()) return; // that's us
     card.classList.add('ce-card');
 
     const wrap = document.createElement('div');
@@ -2294,6 +2329,12 @@
   // "top" to "Chatto Enhancer", then run __ceDebug().
   /* Test hook: which composer would be acted on right now. */
   window.__ceActiveInput = findInput;
+  /* Test hook: local-participant detection, exercised by
+     test/local-card-detection.test.mjs against a minimal DOM shim. */
+  window.__ceLocalCardTestHooks = {
+    isLocalCard, nameOf, localUserName, remoteCards, findCards,
+    addSlider, removeSlider, dropCache, inCall,
+  };
   window.__ceDebug = function () {
     window.__ceDebugOn = !window.__ceDebugOn;
     dropCache();
