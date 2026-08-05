@@ -60,14 +60,6 @@ Once Chatto Enhancer is published on Mozilla Add-ons (AMO), users will be able t
 
 Until then, use the temporary installation above for testing.
 
-## Development
-
-```bash
-npm run check
-npm run build
-npm run package
-```
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
