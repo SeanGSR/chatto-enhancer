@@ -1,6 +1,6 @@
 # Chatto Enhancer
 
-![Chatto Enhancer icon](chatto-enhancer.png)
+<img src="chatto-enhancer.png" alt="Chatto Enhancer icon" width="128">
 
 A browser extension that adds quality-of-life features to Chatto.
 
