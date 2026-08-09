@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chatto Enhancer</title>
+<style>
+  body {
+    width: 260px;
+    margin: 0;
+    padding: 12px 14px;
+    background: #272727;
+    color: #eaeaef;
+    font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+  h1 {
+    font-size: 13px;
+    margin: 0 0 10px;
+    font-weight: 700;
+  }
+  label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    cursor: pointer;
+  }
+  input[type="checkbox"] {
+    flex-shrink: 0;
+    accent-color: #2f9bf5;
+  }
+  p.note {
+    font-size: 11px;
+    color: #8b8b96;
+    margin: 10px 0 0;
+    line-height: 1.4;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin: 12px 0;
+  }
+  h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #8b8b96;
+    margin: 0 0 8px;
+    font-weight: 700;
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+  }
+  button {
+    flex: 1;
+    height: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: #272727;
+    color: #eaeaef;
+    font: 600 12px inherit;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
+  }
+  button:hover {
+    background: #343434;
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+  button:active {
+    transform: translateY(1px);
+  }
+  button:focus-visible {
+    outline: 2px solid #2f9bf5;
+    outline-offset: 1px;
+  }
+  #dataStatus {
+    min-height: 14px;
+    font-size: 11px;
+    color: #8b8b96;
+    margin-top: 8px;
+  }
+  #siteStatus {
+    min-height: 14px;
+    font-size: 11px;
+    color: #8b8b96;
+    margin: 0 0 10px;
+  }
+  #enableHereBtn {
+    display: none;
+    width: 100%;
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+  <h1>Chatto Enhancer</h1>
+  <h2>This site</h2>
+  <p id="siteStatus">Checking…</p>
+  <button id="enableHereBtn" type="button">Enable here</button>
+  <hr>
+  <div id="toggles"></div>
+  <p class="note">Reload Chatto's tab after changing these for them to take effect.</p>
+  <hr>
+  <h2>Data</h2>
+  <div class="row">
+    <button id="exportBtn" type="button">Export</button>
+    <button id="importBtn" type="button">Import</button>
+    <input id="importFile" type="file" accept="application/json" style="display:none">
+  </div>
+  <p id="dataStatus"></p>
+  <p class="note">Exports your volumes, nicknames, and GIF favorites as a file — useful when moving to a new browser or profile, since none of this syncs on its own.</p>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,17 +1,27 @@
 {
   "manifest_version": 3,
   "name": "Chatto Enhancer",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Per-person volume sliders in voice calls, an emoji picker, and markdown formatting in the message box.",
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://api.giphy.com/*",
     "https://*.giphy.com/*"
   ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Chatto Enhancer settings"
   },
   "browser_specific_settings": {
     "gecko": {

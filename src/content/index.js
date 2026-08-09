@@ -104,6 +104,50 @@
     return out;
   }
 
+  /* --- feature toggles ------------------------------------------------
+     Read once at startup (see the combined storageGet() below) and never
+     re-read afterward — a setting flipped in the popup takes effect on the
+     next page load, not live. That's a deliberate simplification: doing
+     this live would mean writing a teardown path for every feature (remove
+     buttons, close open pickers, disconnect listeners) in addition to the
+     setup path that already exists, roughly doubling this section's
+     surface for a responsiveness win most users won't need. The popup says
+     as much rather than implying it's instant.
+
+     Disabling a feature here skips its setup work — it never builds its
+     DOM, never runs its per-scan checks, never opens network connections
+     (GIF search/fetch) — which is the actual point: the manifest still
+     declares this whole file as one content script, so the browser loads
+     and parses it regardless of these flags (that part is unavoidable
+     without splitting into several separately-injected scripts, a much
+     larger change than this pass). What these flags buy is real: skipping
+     ~1,900 emoji buttons' worth of DOM construction, or a GIF search
+     round-trip, when that feature is off. */
+  const FEATURES = [
+    { key: 'volume', label: 'Per-participant volume sliders' },
+    { key: 'emoji', label: 'Emoji picker' },
+    { key: 'gif', label: 'GIF picker' },
+    { key: 'markdown', label: 'Markdown toolbar' },
+    { key: 'pip', label: 'Screen-share pop-out button' },
+    { key: 'nicknames', label: 'Local nicknames' },
+  ];
+
+  function defaultSettings() {
+    const out = {};
+    for (const f of FEATURES) out[f.key] = true;
+    return out;
+  }
+
+  function cleanSettings(value) {
+    const out = defaultSettings();
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const f of FEATURES) if (typeof value[f.key] === 'boolean') out[f.key] = value[f.key];
+    }
+    return out;
+  }
+
+  let settings = defaultSettings();
+
   const MAX_GIF_FAVORITES = 200;
 
   /** Favorited GIFs are rendered as <img src> directly from stored data,
@@ -217,11 +261,24 @@
     });
   }
 
-  storageGet(['volumes', 'recents']).then((r) => {
+  /* One combined read instead of three separate storage round-trips (this
+     used to be volumes/recents, nicknames, and gifFavorites each reading
+     independently) — nicknames/gifFavorites/settings are declared with
+     `let` further down but already initialized by the time this callback
+     runs, since a promise callback can't fire until the whole synchronous
+     script body — every `let` in it — has finished executing. */
+  storageGet(['volumes', 'recents', 'nicknames', 'gifFavorites', 'settings']).then((r) => {
     volumes = cleanVolumes(r && r.volumes);
     recents = cleanRecents(r && r.recents);
+    nicknames = cleanNicknames(r && r.nicknames);
+    gifFavorites = cleanGifFavorites(r && r.gifFavorites);
+    settings = cleanSettings(r && r.settings);
     ready = true;
     findCards().forEach(paintCard);
+    if (settings.nicknames) {
+      findCards().forEach(applyNickname);
+      applyNicknamesEverywhere();
+    }
   });
 
   let saveTimer = null;
@@ -508,6 +565,342 @@
     });
   }
 
+  /* --- screen-share pop-out (Picture-in-Picture) --------------------------
+     Confirmed working live: requestPictureInPicture() on the screen-share
+     card's <video> opens a genuine OS-level floating window that stays on
+     top of every window — not just the browser — on Windows, macOS, and
+     Linux/X11. On Linux/Wayland this is a known platform limitation outside
+     anything a page or extension can control: Wayland deliberately does not
+     let a client force itself above other windows, so the popped-out
+     window may not stay on top there without a manual compositor-level
+     override (e.g. KWin's "Keep above others" window rule). Nothing to work
+     around here — it is between the browser and the compositor. */
+
+  function findScreenShareCards() {
+    return cached('screenShareCards', () => qsa('[data-testid="call-screen-share-card"]'));
+  }
+
+  /* Picture-in-picture glyph — a frame with a smaller floating rectangle in
+     the corner, the composition most open-source icon sets (Lucide, Tabler,
+     Material) use for this concept. Redrawn to this codebase's own stroke
+     convention (24x24, 1.7px stroke, round caps — matching gifIcon() and
+     the markdown toolbar icons) rather than copied byte-for-byte from a
+     specific set, the same honesty standard applied to the GIF icon. */
+  function pipIcon() {
+    const svg = svgEl('svg', {
+      viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+      'stroke-width': '1.7', 'stroke-linecap': 'round',
+      'stroke-linejoin': 'round', 'aria-hidden': 'true',
+      // Chatto's own icons in this toolbar render at text-base (16px), via
+      // an icon font/mask sized by font-size. An <svg> ignores font-size
+      // and defaults to its own intrinsic size without explicit dimensions
+      // — hence oversized until pinned here to match.
+      width: '16', height: '16',
+    });
+    svg.appendChild(svgEl('path', { d: 'M21 9V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4' }));
+    svg.appendChild(svgEl('rect', { x: '12', y: '13', width: '10', height: '7', rx: '2' }));
+    return svg;
+  }
+
+  /** One pop-out button per screen-share card, dropped into Chatto's own
+      call-media-actions toolbar right beside its Fullscreen/Mute buttons —
+      reusing Chatto's exact button classes (proven to exist and work,
+      since Chatto's own buttons in the same toolbar use them) so it reads
+      as a native control rather than something bolted on. Mirrors
+      addEmojiButton()'s per-card tracking and cleanup. */
+  function ensurePipButtons() {
+    if (!document.pictureInPictureEnabled) return; // browser doesn't support it at all
+    const cards = findScreenShareCards();
+    const live = new Set(cards.map(cidOf));
+
+    qsa('.ce-pip-btn').forEach((b) => {
+      if (!b.isConnected || !live.has(b.dataset.ceFor)) b.remove();
+    });
+
+    for (const card of cards) {
+      const cid = cidOf(card);
+      const existing = qsa('.ce-pip-btn').find((b) => b.dataset.ceFor === cid);
+      if (existing && existing.isConnected) continue;
+
+      const toolbar = qs('[data-testid="call-media-actions"]', card);
+      const video = card.querySelector('video');
+      if (!toolbar || !video) continue;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pointer-events-auto flex h-10 w-10 cursor-pointer items-center ' +
+        'justify-center rounded text-muted transition-[background-color,color,scale] ' +
+        'hover:bg-surface-200 hover:text-text focus-visible:outline-2 ' +
+        'focus-visible:outline-offset-1 focus-visible:outline-primary active:scale-[0.96] ce-pip-btn';
+      btn.title = 'Pop out (Picture-in-Picture)';
+      btn.setAttribute('aria-label', 'Pop out video');
+      btn.dataset.ceFor = cid;
+      btn.appendChild(pipIcon());
+
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          if (document.pictureInPictureElement === video) await document.exitPictureInPicture();
+          else await video.requestPictureInPicture();
+        } catch (err) {
+          warn('could not pop out this video:', err && err.message ? err.message : err);
+        }
+      });
+
+      toolbar.appendChild(btn);
+    }
+  }
+
+  /* --- local nicknames -----------------------------------------------------
+     A "Rename" button added to Chatto's own user-profile popover (the one
+     with "Send Message" / "Ban from room"). There is no Chatto API this
+     extension can call to actually rename someone server-side, and this
+     never claims to — it is a purely local, visual relabeling that only the
+     person who set it ever sees. Nicknames are stored keyed by the
+     person's real display name, the same convention (and the same
+     duplicate-name caveat — see SECURITY-REVIEW.md) already used for
+     per-participant volume levels.
+
+     Currently applied only to call participant cards, the one place this
+     extension already has solid, tested control over card DOM structure.
+     Message author names, the member sidebar, and DM list entries are not
+     covered yet — that would need separate live DOM evidence for that
+     markup before touching it. The Rename button itself still appears
+     wherever the popover does, since it is one shared Chatto component. */
+
+  const MAX_NICKNAMES = 500;
+
+  function cleanNicknames(value) {
+    const out = Object.create(null);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+    let n = 0;
+    for (const key of Object.keys(value)) {
+      if (n >= MAX_NICKNAMES) break;
+      const name = cleanName(key);
+      const nick = typeof value[key] === 'string' ? cleanName(value[key]) : null;
+      if (name && nick) { out[name] = nick; n++; }
+    }
+    return out;
+  }
+
+  // Populated by the combined storageGet() near the top of this file.
+  let nicknames = Object.create(null);
+
+  function findProfilePopovers() {
+    return cached('profilePopovers', () => resolveMany('profilePopover', [
+      ['aria-label', () => qsa('[popover][aria-label="User profile"]')],
+      ['dialog-fallback', () => qsa('[role="dialog"]').filter((el) =>
+        qsa('.sidebar-item', el).some((b) => b.textContent.trim() === 'Send Message'))],
+    ]));
+  }
+
+  function realNameFromPopover(popover) {
+    const el = popover.querySelector('.font-semibold');
+    const name = el && el.textContent.trim();
+    return name || null;
+  }
+
+  /* Checkmark glyph — the same simple polyline every open-source stroke-icon
+     set (Feather, Lucide, Tabler) uses for "confirm", drawn to this
+     codebase's own convention rather than copied from a specific set. */
+  function checkIcon() {
+    const svg = svgEl('svg', {
+      viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+      'stroke-width': '2', 'stroke-linecap': 'round',
+      'stroke-linejoin': 'round', 'aria-hidden': 'true',
+      width: '16', height: '16',
+    });
+    svg.appendChild(svgEl('polyline', { points: '20 6 9 17 4 12' }));
+    return svg;
+  }
+
+  /** Toggles an inline "nickname + confirm" row directly under the Rename
+      button, instead of a native window.prompt() — sits inside Chatto's own
+      popover so it reads as part of that menu rather than an OS dialog. */
+  function toggleRenameField(popover, renameBtn) {
+    const existing = popover.querySelector('.ce-rename-field');
+    if (existing) { existing.remove(); return; }
+
+    const realName = realNameFromPopover(popover);
+    if (!realName) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'ce-rename-input';
+    input.placeholder = 'Nickname — only visible to you';
+    input.value = nicknames[realName] || '';
+    input.maxLength = MAX_NAME_LEN;
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'ce-rename-confirm';
+    confirmBtn.title = 'Save nickname';
+    confirmBtn.setAttribute('aria-label', 'Save nickname');
+    confirmBtn.appendChild(checkIcon());
+
+    const row = document.createElement('div');
+    row.className = 'ce-rename-field';
+    row.appendChild(input);
+    row.appendChild(confirmBtn);
+
+    const save = () => {
+      const nick = cleanName(input.value);
+      if (nick) nicknames[realName] = nick;
+      else delete nicknames[realName];
+      storageSet({ nicknames });
+      findCards().forEach(applyNickname);
+      applyNicknamesEverywhere();
+      row.remove();
+    };
+
+    // Keep every interaction with the field from being read by Chatto's own
+    // "click outside this manual popover, close it" handling as a click
+    // outside — same reasoning as the markdown toolbar buttons' mousedown
+    // preventDefault, just for a text field instead of a selection.
+    row.addEventListener('mousedown', (e) => e.stopPropagation());
+    row.addEventListener('click', (e) => e.stopPropagation());
+    confirmBtn.addEventListener('click', (e) => { e.preventDefault(); save(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') { e.preventDefault(); row.remove(); }
+    });
+
+    renameBtn.insertAdjacentElement('afterend', row);
+    input.focus();
+    input.select();
+  }
+
+  function addRenameButtons() {
+    for (const popover of findProfilePopovers()) {
+      if (popover.querySelector('.ce-rename-btn')) continue;
+      const sendBtn = qsa('.sidebar-item', popover).find((b) => b.textContent.trim() === 'Send Message');
+      if (!sendBtn || !sendBtn.parentElement) continue;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      // Chatto's own class for this exact menu's buttons, so it matches
+      // Send Message / Ban from room instead of looking bolted on.
+      btn.className = sendBtn.className + ' ce-rename-btn';
+      btn.textContent = 'Rename';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleRenameField(popover, btn);
+      });
+
+      sendBtn.parentElement.insertBefore(btn, sendBtn.nextSibling);
+    }
+  }
+
+  /** Swaps a participant card's displayed name for its nickname, if any —
+      without touching nameOf()'s return value, which every piece of
+      internal logic (local-user detection, volume keys, voice matching)
+      must keep reading as the real name. Chatto's own name element is
+      hidden via a class rather than mutated, so a Svelte re-render of that
+      node (e.g. on a speaking-state change) can't silently undo this; the
+      replacement is a sibling element re-applied every scan instead. */
+  /** Hides `target` and shows/updates a sibling label with the nickname for
+      `real`, or restores `target` if there is no nickname for it. Shared by
+      every surface below — each one only has to find the right element and
+      the right real name; this owns the actual swap exactly once. Never
+      touches target's own textContent, so re-reading it later (as
+      applyNicknameToMessageAuthor does, since it has no other source for
+      the real name) always still returns the real name, hidden or not. */
+  function swapNameDisplay(target, real) {
+    if (!target || !real) return;
+    const nick = nicknames[real];
+    const existing = target.nextElementSibling;
+    const label = existing && existing.classList && existing.classList.contains('ce-nick-label')
+      ? existing : null;
+
+    if (!nick) {
+      target.classList.remove('ce-name-hidden');
+      if (label) label.remove();
+      return;
+    }
+    // Base the label's classes on target's *un-hidden* class list: adding
+    // ce-name-hidden to target first, then copying its className, would
+    // carry that class onto the label too — hiding both spans instead of
+    // swapping one for the other. Also strips ce-nick-label itself so a
+    // second call (target already hidden from a previous scan) can't
+    // accumulate duplicates of either class.
+    const baseClass = target.className
+      .split(/\s+/)
+      .filter((c) => c && c !== 'ce-name-hidden' && c !== 'ce-nick-label')
+      .join(' ');
+    target.classList.add('ce-name-hidden');
+    const el = label || document.createElement(target.tagName.toLowerCase());
+    el.className = baseClass + ' ce-nick-label';
+    if (el.textContent !== nick) el.textContent = nick;
+    el.title = 'Local nickname for ' + real + ' — only visible to you';
+    if (!label) target.insertAdjacentElement('afterend', el);
+  }
+
+  function applyNickname(card) {
+    swapNameDisplay(card.querySelector('span, p, h1, h2, h3, h4'), nameOf(card));
+  }
+
+  /* --- extending nicknames to the rest of the app -------------------------
+     Each surface below is a distinct piece of Chatto markup, found and
+     confirmed live rather than guessed. All three only ever touch a name
+     *label* element — never a message body — since swapping the visible
+     text of an actual message would misrepresent what someone really typed,
+     which this extension does not do anywhere else either. */
+
+  /** Member sidebar: `title="View profile of <name>"` on the row button
+      already carries the exact real name, so there is no ambiguity about
+      what to look up even though the visible span itself carries no id. */
+  function findMemberListEntries() {
+    return cached('memberListEntries', () => qsa('button.sidebar-item[title^="View profile of "]'));
+  }
+
+  function applyNicknameToMemberEntry(btn) {
+    const title = btn.getAttribute('title') || '';
+    const prefix = 'View profile of ';
+    if (!title.startsWith(prefix)) return;
+    const real = title.slice(prefix.length).trim();
+    swapNameDisplay(qs('span.min-w-0.truncate', btn), real);
+  }
+
+  /** Message author name: the bold, underlined-on-hover name button shown
+      above a message. No testid or title to read the name from, so the
+      name span's own text is the source of truth — safe to re-read every
+      scan since swapNameDisplay() never rewrites it. */
+  function findMessageAuthorButtons() {
+    return cached('messageAuthorButtons', () => qsa('button').filter((b) =>
+      b.classList.contains('font-semibold') &&
+      b.classList.contains('hover:underline') &&
+      b.classList.contains('leading-none') &&
+      b.classList.contains('inline-flex')));
+  }
+
+  function applyNicknameToMessageAuthor(btn) {
+    const nameEl = btn.querySelector('span');
+    if (!nameEl || nameEl.classList.contains('ce-nick-label')) return;
+    swapNameDisplay(nameEl, nameEl.textContent.trim());
+  }
+
+  /** Direct-message list entry. `a.sidebar-item` alone is too broad (it
+      also matches channel links), so this only acts on ones with the exact
+      avatar-stack + name-span shape a DM entry has. */
+  function findDmListEntries() {
+    return cached('dmListEntries', () => qsa('a.sidebar-item'));
+  }
+
+  function applyNicknameToDmEntry(a) {
+    const nameEl = qs(':scope > span.flex-1.truncate', a);
+    if (!nameEl || nameEl.classList.contains('ce-nick-label')) return;
+    swapNameDisplay(nameEl, nameEl.textContent.trim());
+  }
+
+  function applyNicknamesEverywhere() {
+    findMemberListEntries().forEach(applyNicknameToMemberEntry);
+    findMessageAuthorButtons().forEach(applyNicknameToMessageAuthor);
+    findDmListEntries().forEach(applyNicknameToDmEntry);
+  }
+
   /** Our own display name, so we don't put a volume slider on our own card.
       Confirmed against the account panel Chatto renders in the channel
       sidebar (also [data-testid="current-user-identity-text"], reused for
@@ -615,6 +1008,19 @@
   }
 
   const getVol = (name) => (name in volumes ? volumes[name] : 1);
+
+  /** The slider position (0-1, what's stored and shown as a percentage) is
+      not what actually gets sent as the audio element's gain — human
+      hearing is roughly logarithmic, not linear, so a literal
+      volume = sliderPosition made the top half of the slider barely
+      audible: dropping from 100% to 50% is only about a 6dB cut, well
+      short of the ~10dB reduction that actually sounds "half as loud."
+      Squaring the slider position before sending it as gain front-loads
+      more of the perceptible change into the upper half of the slider's
+      travel, without changing what's stored or displayed — the badge still
+      reads "50%" at the halfway point, it now just sounds like a much more
+      meaningful cut there too. */
+  const perceptualGain = (v) => v * v;
 
   /* One window-level release for every slider. Firefox drops pointercancel in
      some drag cases; this guarantees no bar is left stuck in its drag state.
@@ -920,7 +1326,7 @@
 
   function applyVolumes() {
     for (const [name, id] of Object.entries(mapping)) {
-      send('set', { id, factor: name in volumes ? volumes[name] : 1 });
+      send('set', { id, factor: perceptualGain(name in volumes ? volumes[name] : 1) });
     }
   }
 
@@ -945,9 +1351,55 @@
     volumes[name] = v;
     paintCard(card);
     const id = idForCard(card);
-    if (id) send('set', { id, factor: v });
+    if (id) send('set', { id, factor: perceptualGain(v) });
     else if (window.__ceDebugOn) log('no audio stream matched to ' + name + ' yet');
     saveSoon();
+  }
+
+  function resetAllVolumes() {
+    volumes = Object.create(null);
+    saveSoon();
+    applyVolumes();
+    findCards().forEach(paintCard);
+  }
+
+  function resetIcon() {
+    const svg = svgEl('svg', {
+      viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+      'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      'aria-hidden': 'true', width: '14', height: '14',
+    });
+    svg.appendChild(svgEl('path', { d: 'M3 12a9 9 0 1 0 3-6.7' }));
+    svg.appendChild(svgEl('polyline', { points: '3 4 3 9 8 9' }));
+    return svg;
+  }
+
+  /** One button, above the participant list, that clears every stored
+      volume back to 100% at once — the existing per-slider double-click
+      reset already covers one person at a time. Inserted as a sibling of
+      [data-testid="call-participants-list"], a selector already relied on
+      elsewhere (findCards()'s own fallback strategy), rather than beside
+      Chatto's own call-controls row, whose exact markup this project has
+      no DOM evidence for. */
+  function ensureVolumeResetButton() {
+    const list = qs('[data-testid="call-participants-list"]');
+    if (!list || !list.parentElement) return;
+    if (list.parentElement.querySelector('.ce-vol-reset-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ce-vol-reset-btn';
+    btn.title = "Reset everyone's volume to 100%";
+    btn.setAttribute('aria-label', 'Reset all volumes to 100%');
+    btn.appendChild(resetIcon());
+    btn.appendChild(document.createTextNode('Reset volumes'));
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resetAllVolumes();
+    });
+    list.parentElement.insertBefore(btn, list);
   }
 
   function addSlider(card) {
@@ -1558,10 +2010,8 @@
   let gifSearchSeq = 0;
   let gifTab = 'search'; // 'search' | 'favorites'
 
+  // Populated by the combined storageGet() near the top of this file.
   let gifFavorites = [];
-  storageGet(['gifFavorites']).then((r) => {
-    gifFavorites = cleanGifFavorites(r && r.gifFavorites);
-  });
 
   function isGifFavorited(id) {
     return gifFavorites.some((f) => f.id === id);
@@ -2612,7 +3062,7 @@
      stuck. Only asks the page for state; never affects bar visibility. */
   let mdStateFrame = 0;
   function scheduleActiveState() {
-    if (mdStateFrame) return;
+    if (!settings.markdown || mdStateFrame) return;
     const run = () => {
       clearTimeout(mdStateFrame);
       mdStateFrame = 0;
@@ -2632,6 +3082,7 @@
      defaults — Ctrl+B opens the bookmarks sidebar in Firefox and Ctrl+K jumps
      to the search bar. Only fires while the composer has focus. */
   document.addEventListener('keydown', (e) => {
+    if (!settings.markdown) return;
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const inp = findInput();
     if (!inp || !inp.contains(document.activeElement)) return;
@@ -2643,6 +3094,24 @@
     e.preventDefault();
     e.stopPropagation();
     applyFormat(fmt);
+  }, true);
+
+  /* Ctrl+Shift+E toggles the emoji picker for the focused composer without
+     touching the mouse. Shift distinguishes it from the markdown
+     handler's own Ctrl+E (inline code) above — no FORMATS entry uses
+     shift with the 'e' key, so the two can never collide. */
+  document.addEventListener('keydown', (e) => {
+    if (!settings.emoji) return;
+    if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
+    if ((e.key || '').toLowerCase() !== 'e') return;
+    const inp = findInput();
+    if (!inp || !inp.contains(document.activeElement)) return;
+    const btn = qsa('.ce-emoji-btn').find((b) => b.dataset.ceFor === cidOf(inp));
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    togglePicker(btn);
   }, true);
 
   /* =========================================================================
@@ -2729,19 +3198,32 @@
   function scan() {
     dropCache();
     if (inCall()) {
-      findCards().forEach(addSlider);
-    } else {
+      if (settings.volume) {
+        findCards().forEach(addSlider);
+        ensureVolumeResetButton();
+      }
+      if (settings.nicknames) findCards().forEach(applyNickname);
+      if (settings.pip) ensurePipButtons();
+    } else if (settings.volume) {
       // Left the call (or only observing) — take the sliders back off.
       document.querySelectorAll('.ce-vol').forEach((v) => v.remove());
       document.querySelectorAll('.ce-card').forEach((c) => c.classList.remove('ce-card'));
+      document.querySelectorAll('.ce-pip-btn').forEach((b) => b.remove());
+      document.querySelectorAll('.ce-vol-reset-btn').forEach((b) => b.remove());
       mapping = Object.create(null);
       audioIds = [];
     }
-    addEmojiButton();
-    addGifButton();
+    if (settings.emoji) addEmojiButton();
+    if (settings.gif) addGifButton();
+    if (settings.nicknames) {
+      addRenameButtons();
+      applyNicknamesEverywhere();
+    }
     syncTheme();
-    mdQueryMaybe();
-    ensureMdBar();
+    if (settings.markdown) {
+      mdQueryMaybe();
+      ensureMdBar();
+    }
   }
 
   /* One scan per animation frame at most, rather than a 60 ms timer per

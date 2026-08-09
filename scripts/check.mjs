@@ -54,8 +54,14 @@ for (const script of ['check', 'build', 'package']) {
     fail(`package.json script "${script}" must point to an existing scripts/*.mjs file`);
   }
 }
-if (!Array.isArray(sharedManifest.permissions) || sharedManifest.permissions.join(',') !== 'storage') {
-  fail('manifest permissions must be exactly ["storage"]');
+if (!Array.isArray(sharedManifest.permissions) || sharedManifest.permissions.join(',') !== 'storage,activeTab,scripting') {
+  fail('manifest permissions must be exactly ["storage", "activeTab", "scripting"]');
+}
+if (
+  !Array.isArray(sharedManifest.optional_host_permissions) ||
+  sharedManifest.optional_host_permissions.join(',') !== 'http://*/*,https://*/*'
+) {
+  fail('manifest optional_host_permissions must be exactly ["http://*/*", "https://*/*"]');
 }
 
 for (const target of targets) {
