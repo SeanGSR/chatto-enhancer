@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chatto Enhancer",
-  "version": "1.1",
+  "version": "1.1.1",
   "description": "Per-person volume sliders in voice calls, an emoji picker, and markdown formatting in the message box.",
   "permissions": [
     "storage",
@@ -43,16 +43,14 @@
         "main-world.js"
       ],
       "matches": [
-        "https://chat.chatto.run/*",
-        "https://chatto.pixel-box.net/*"
+        "https://chat.chatto.run/*"
       ]
     }
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://chat.chatto.run/*",
-        "https://chatto.pixel-box.net/*"
+        "https://chat.chatto.run/*"
       ],
       "js": [
         "main-world.js"
@@ -63,8 +61,7 @@
     },
     {
       "matches": [
-        "https://chat.chatto.run/*",
-        "https://chatto.pixel-box.net/*"
+        "https://chat.chatto.run/*"
       ],
       "js": [
         "emoji-data.js",

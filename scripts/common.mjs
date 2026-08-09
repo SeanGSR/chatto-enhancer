@@ -56,7 +56,7 @@ function validateBuildConfig() {
   }
 
   if (!Array.isArray(buildConfig.hostMatches) || !buildConfig.hostMatches.every((match) =>
-    match === 'https://chat.chatto.run/*' || match === 'https://chatto.pixel-box.net/*')) {
+    match === 'https://chat.chatto.run/*')) {
     throw new Error('hostMatches must be restricted to the intended Chatto domains');
   }
   if (typeof buildConfig.geckoId !== 'string' || !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(buildConfig.geckoId)) {

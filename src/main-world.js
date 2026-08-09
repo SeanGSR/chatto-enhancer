@@ -269,7 +269,20 @@
   let ac = null;
   const taps = new Map();   // id -> { src, an, data }
 
+  /* Deliberately never constructs an AudioContext on its own — reading it
+     before the user's first click/keydown anywhere on the page is exactly
+     what triggers Chrome's "AudioContext was not allowed to start" console
+     warning (it fires at construction, not at resume(); catching resume()'s
+     rejection alone doesn't stop it). ensureAudioCtx() below is the only
+     thing allowed to create one, and only runs from inside a real gesture
+     handler. Until that first gesture, tap() below just returns null and
+     the level-measuring loop skips that cycle — a few missed loudness
+     samples right after page load, not a functional loss. */
   function audioCtx() {
+    return ac;
+  }
+
+  function ensureAudioCtx() {
     if (ac) return ac;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
@@ -293,7 +306,7 @@
   }
 
   // An AudioContext may start suspended until the user interacts.
-  const wake = () => { const c = audioCtx(); if (c && c.state === 'suspended') c.resume().catch(() => {}); };
+  const wake = () => { const c = ensureAudioCtx(); if (c && c.state === 'suspended') c.resume().catch(() => {}); };
   window.addEventListener('click', wake, true);
   window.addEventListener('keydown', wake, true);
 

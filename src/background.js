@@ -130,8 +130,141 @@ function handleMessage(msg, _sender, sendResponse) {
     giphyFetchBytes(msg.url).then(sendResponse);
     return true;
   }
+  if (msg.type === 'notify-reload' && typeof msg.origin === 'string') {
+    notifyTabsToReload(msg.origin);
+    return false;
+  }
   return false;
 }
 
 const API = (typeof browser !== 'undefined' && browser && browser.runtime) ? browser : chrome;
 API.runtime.onMessage.addListener(handleMessage);
+
+/* ---------------------------------------------------------------------
+   "Enable here" persistence — reacts to a permission grant directly,
+   rather than depending on the settings popup to run the registration
+   itself after the browser's own permission prompt closes.
+
+   Some browsers close the extension's popup the instant that native
+   prompt appears, which kills any pending JavaScript in it — including
+   whatever was supposed to run right after chrome.permissions.request()
+   resolved. Registration was previously only ever attempted from the
+   popup, so a closed popup meant the permission ended up granted but the
+   content scripts never got registered, leaving the user needing to
+   reopen the popup and click "Repair" by hand every time. Listening for
+   the grant here instead means it happens the moment permission is
+   approved, independent of whether the popup that triggered it is still
+   open. popup.js still repeats this same attempt for whichever origin the
+   user is looking at, so the two are redundant with each other rather
+   than either being a single point of failure. */
+
+function scriptIdsFor(origin) {
+  return {
+    mainId: `chatto-enhancer-main-${origin}`,
+    contentId: `chatto-enhancer-content-${origin}`,
+  };
+}
+
+async function registerScriptsForOrigin(origin) {
+  const originPattern = `${origin}/*`;
+  const { mainId, contentId } = scriptIdsFor(origin);
+  try {
+    await API.scripting.unregisterContentScripts({ ids: [mainId, contentId] });
+  } catch (_) { /* nothing registered yet for this origin — fine */ }
+  await API.scripting.registerContentScripts([
+    {
+      id: mainId,
+      js: ['main-world.js'],
+      matches: [originPattern],
+      runAt: 'document_start',
+      world: 'MAIN',
+    },
+    {
+      id: contentId,
+      js: ['emoji-data.js', 'content/index.js'],
+      css: ['styles.css'],
+      matches: [originPattern],
+      runAt: 'document_idle',
+    },
+  ]);
+}
+
+function originFromMatchPattern(pattern) {
+  const m = /^([a-z][a-z0-9+.-]*:\/\/[^/]+)\/\*$/i.exec(pattern);
+  return m ? m[1] : null;
+}
+
+/* Runs inside the target page, not this file's own scope — must stay fully
+   self-contained (no closures over anything outside it). A native OS
+   notification would need its own icon and a new "notifications"
+   permission for something this minor; an on-page banner needs neither and
+   appears right where the user is already looking. */
+function showEnableBanner() {
+  if (document.getElementById('__chattoEnhancerEnableBanner')) return;
+  const el = document.createElement('div');
+  el.id = '__chattoEnhancerEnableBanner';
+  el.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);'
+    + 'display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;'
+    + 'background:#272727;color:#eaeaef;border:1px solid rgba(255,255,255,0.1);'
+    + 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.45);'
+    + 'font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;'
+    + 'z-index:2147483647;';
+
+  const text = document.createElement('span');
+  text.textContent = 'Chatto Enhancer is enabled here — reload the page to activate it.';
+  el.appendChild(text);
+
+  const reload = document.createElement('button');
+  reload.type = 'button';
+  reload.textContent = 'Reload';
+  reload.style.cssText = 'background:#2f9bf5;color:#fff;border:none;border-radius:6px;'
+    + 'padding:6px 12px;font:600 12px inherit;cursor:pointer;flex-shrink:0;';
+  reload.addEventListener('click', () => location.reload());
+  el.appendChild(reload);
+
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.textContent = '✕';
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.style.cssText = 'background:transparent;color:#8b8b96;border:none;'
+    + 'font:600 14px inherit;cursor:pointer;padding:0 2px;flex-shrink:0;';
+  dismiss.addEventListener('click', () => el.remove());
+  el.appendChild(dismiss);
+
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 20000);
+}
+
+function notifyTabsToReload(origin) {
+  API.tabs.query({ url: `${origin}/*` }).then((tabs) => {
+    for (const tab of tabs || []) {
+      if (tab.id == null) continue;
+      API.scripting.executeScript({ target: { tabId: tab.id }, func: showEnableBanner }).catch(() => {
+        // Some tabs (e.g. chrome://, or one mid-navigation) can't be
+        // injected into — nothing to recover, the banner is a courtesy.
+      });
+    }
+  }).catch(() => {});
+}
+
+if (API.permissions && API.permissions.onAdded) {
+  API.permissions.onAdded.addListener((added) => {
+    const origins = (added && added.origins) || [];
+    for (const pattern of origins) {
+      const origin = originFromMatchPattern(pattern);
+      if (!origin) continue;
+      let hostname;
+      try { hostname = new URL(origin).hostname; } catch (_) { continue; }
+      // The Giphy host permissions are declared up front, not granted
+      // through "Enable here" — this listener only ever needs to act on a
+      // newly approved Chatto domain.
+      if (/(^|\.)giphy\.com$/i.test(hostname)) continue;
+      registerScriptsForOrigin(origin)
+        .then(() => notifyTabsToReload(origin))
+        .catch(() => {
+          // If this also fails, popup.js's own attempt (or its "Repair"
+          // fallback, the next time it's opened) is what's left to recover.
+        });
+    }
+  });
+}

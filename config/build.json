@@ -1,6 +1,6 @@
 {
   "name": "chatto-enhancer",
-  "version": "1.1",
+  "version": "1.1.1",
   "extensionFiles": [
     "manifest.json",
     "background.js",
@@ -21,8 +21,7 @@
     "popup.js": "src/popup.js"
   },
   "hostMatches": [
-    "https://chat.chatto.run/*",
-    "https://chatto.pixel-box.net/*"
+    "https://chat.chatto.run/*"
   ],
   "geckoId": "chatto-enhancer@local.extension"
 }

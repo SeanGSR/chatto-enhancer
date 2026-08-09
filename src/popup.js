@@ -38,6 +38,19 @@ function storageSet(obj) {
   } catch (_) { /* extension context can go away mid-edit; nothing to do */ }
 }
 
+function notifyReload(origin) {
+  // Asks background.js to drop its on-page "reload to activate" banner
+  // into any open tab on this origin. Kept in the background script rather
+  // than duplicated here so there's one copy of the banner's own markup —
+  // see src/background.js for why this exists at all (this popup can be
+  // closed by the browser's own permission prompt before it gets to run
+  // anything after the user approves it).
+  try {
+    const r = API.runtime.sendMessage({ type: 'notify-reload', origin });
+    if (r && typeof r.catch === 'function') r.catch(() => {});
+  } catch (_) { /* nothing to recover — purely a courtesy notice */ }
+}
+
 function defaultSettings() {
   const out = {};
   for (const f of FEATURES) out[f.key] = true;
@@ -229,6 +242,8 @@ async function checkThisSite() {
   const enableBtn = document.getElementById('enableHereBtn');
   enableBtn.style.display = 'none';
   enableBtn.textContent = 'Enable here';
+  enableBtn.disabled = false;
+  document.getElementById('enableProgress').style.display = 'none';
   delete enableBtn.dataset.origin;
   delete enableBtn.dataset.mode;
 
@@ -252,14 +267,24 @@ async function checkThisSite() {
       setSiteStatus('Already enabled on this site.');
       return;
     }
-    // Permission exists but the scripts never actually registered — a
-    // stuck state a past version of this popup could leave behind. Offer a
-    // one-click fix rather than requiring a permission re-grant.
-    setSiteStatus('Permission is granted, but the scripts never registered.');
-    enableBtn.textContent = 'Repair';
-    enableBtn.dataset.origin = origin;
-    enableBtn.dataset.mode = 'repair';
-    enableBtn.style.display = 'block';
+    // Permission exists but the scripts never actually registered — usually
+    // because the permission prompt's own dialog closed this popup before
+    // it got the chance, right after the user clicked Allow (the
+    // background service worker normally handles this itself the instant
+    // permission is granted; this is a fallback for whenever it doesn't).
+    // Repair automatically rather than making the user notice and click a
+    // button for something that isn't really a choice.
+    try {
+      await registerScriptsFor(origin);
+      setSiteStatus('Enabled! Reload the page to activate it.');
+      notifyReload(origin);
+    } catch (_) {
+      setSiteStatus('Permission is granted, but the scripts never registered.');
+      enableBtn.textContent = 'Repair';
+      enableBtn.dataset.origin = origin;
+      enableBtn.dataset.mode = 'repair';
+      enableBtn.style.display = 'block';
+    }
     return;
   }
 
@@ -287,9 +312,19 @@ async function checkThisSite() {
 
 async function enableHere() {
   const enableBtn = document.getElementById('enableHereBtn');
+  const progress = document.getElementById('enableProgress');
   const origin = enableBtn.dataset.origin;
   if (!origin) return;
   const originPattern = `${origin}/*`;
+
+  // The whole flow (permission prompt, then registering the scripts, with
+  // its own automatic retry below) can take a moment with nothing else
+  // visibly happening — disable the button so a second click can't overlap
+  // an in-flight one, and show a loading bar for the duration instead of
+  // leaving the popup looking unresponsive.
+  enableBtn.disabled = true;
+  progress.style.display = 'block';
+  setSiteStatus('Enabling…');
 
   if (enableBtn.dataset.mode !== 'repair') {
     let granted;
@@ -297,24 +332,41 @@ async function enableHere() {
       granted = await API.permissions.request({ origins: [originPattern] });
     } catch (_) {
       setSiteStatus('Permission request failed.');
+      enableBtn.disabled = false;
+      progress.style.display = 'none';
       return;
     }
     if (!granted) {
       setSiteStatus('Permission was not granted.');
+      enableBtn.disabled = false;
+      progress.style.display = 'none';
       return;
     }
   }
 
   try {
     await registerScriptsFor(origin);
-  } catch (e) {
-    const detail = (e && e.message) ? e.message : 'unknown error';
-    setSiteStatus(`Permission granted, but registering scripts failed: ${detail}`);
-    return;
+  } catch (_) {
+    // A freshly granted optional permission is sometimes not yet visible to
+    // the scripting subsystem on the very next call — retrying once, after
+    // giving the browser a moment to catch up, is all "Repair" ever did
+    // manually. Only surface an error if it still fails after that.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    try {
+      await registerScriptsFor(origin);
+    } catch (e) {
+      const detail = (e && e.message) ? e.message : 'unknown error';
+      setSiteStatus(`Permission granted, but registering scripts failed: ${detail}`);
+      enableBtn.disabled = false;
+      progress.style.display = 'none';
+      return;
+    }
   }
 
+  progress.style.display = 'none';
   setSiteStatus('Enabled! Reload the page to activate it.');
   enableBtn.style.display = 'none';
+  notifyReload(origin);
 }
 
 document.getElementById('enableHereBtn').addEventListener('click', enableHere);
