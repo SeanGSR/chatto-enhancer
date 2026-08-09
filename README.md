@@ -4,6 +4,8 @@ A browser extension that adds quality-of-life features to Chatto.
 
 This is an unofficial, community-made extension built for [Chatto](https://github.com/chattocorp/chatto). It is not affiliated with the Chatto project or ChattoCorp.
 
+For other community Chatto projects, see [awesome-chatto](https://github.com/nickk-/awesome-chatto), a list maintained by nickk.
+
 ## Features
 
 - 🔊 Per-participant volume controls, with reset-all
