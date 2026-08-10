@@ -181,7 +181,7 @@ async function registerScriptsForOrigin(origin) {
     },
     {
       id: contentId,
-      js: ['emoji-data.js', 'content/index.js'],
+      js: ['theme-data.js', 'emoji-data.js', 'content/index.js'],
       css: ['styles.css'],
       matches: [originPattern],
       runAt: 'document_idle',
