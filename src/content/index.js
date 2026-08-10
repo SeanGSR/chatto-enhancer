@@ -3501,6 +3501,35 @@
   color: var(--ce-chatto-text) !important;
   caret-color: var(--ce-chatto-accent);
 }
+:root.ce-theme-active .input,
+:root.ce-theme-active input.input,
+:root.ce-theme-active textarea.input,
+:root.ce-theme-active select.input {
+  background-color: var(--ce-chatto-surface) !important;
+  border-color: var(--ce-chatto-border) !important;
+  color: var(--ce-chatto-text) !important;
+  box-shadow: none !important;
+}
+:root.ce-theme-active .input:focus,
+:root.ce-theme-active input.input:focus,
+:root.ce-theme-active textarea.input:focus,
+:root.ce-theme-active select.input:focus {
+  border-color: var(--ce-chatto-accent) !important;
+  outline-color: var(--ce-chatto-accent) !important;
+  box-shadow: 0 0 0 1px var(--ce-chatto-accent) !important;
+}
+:root.ce-theme-active .input:disabled,
+:root.ce-theme-active input.input:disabled,
+:root.ce-theme-active textarea.input:disabled,
+:root.ce-theme-active select.input:disabled {
+  background-color: var(--ce-chatto-surface-100) !important;
+  color: var(--ce-chatto-muted) !important;
+  opacity: 0.75;
+}
+:root.ce-theme-active select.input option {
+  background-color: var(--ce-chatto-surface) !important;
+  color: var(--ce-chatto-text) !important;
+}
 :root.ce-theme-active input::placeholder,
 :root.ce-theme-active textarea::placeholder,
 :root.ce-theme-active [data-placeholder]::before {
