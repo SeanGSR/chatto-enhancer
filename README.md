@@ -17,7 +17,7 @@ For other community Chatto projects, see [awesome-chatto](https://github.com/nic
 - 🖼️ Screen-share pop-out using Picture-in-Picture
 - 🏷️ Local nicknames, visible only to you
 - 🌍 "Enable here" for self-hosted Chatto servers
-- 🎨 Themes with dark/light presets for OLED, Cappuccino, Midnight, Forest, Rose, Lilac, and Turquoise, plus custom colors
+- 🎨 Themes with presets and custom colors
 - ⚙️ Settings popup with feature toggles, themes, and data import/export
 - 🌐 Chromium and Firefox support
 
