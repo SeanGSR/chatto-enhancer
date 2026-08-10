@@ -61,7 +61,7 @@
 
   /* ---------------------------------------------------------------- state -- */
 
-  let volumes = Object.create(null);   // { participantName: 0..1 }
+  let volumes = Object.create(null);   // { participant identity key: 0..1 }
   let recents = [];   // most-recently-used emoji characters
   let ready = false;
 
@@ -132,6 +132,26 @@
     { key: 'nicknames', label: 'Local nicknames' },
   ];
 
+  const THEME_DATA = window.__CHATTO_ENHANCER_THEME_DATA__ || {
+    themes: [
+      { id: 'default', label: 'Default', colors: null },
+      { id: 'custom', label: 'Custom', colors: null },
+    ],
+    customFields: [
+      { key: 'background', value: '#211916' },
+      { key: 'surface', value: '#2b211d' },
+      { key: 'surface100', value: '#3a2a24' },
+      { key: 'text', value: '#f5e7d4' },
+      { key: 'muted', value: '#b99f8e' },
+      { key: 'accent', value: '#c98a5b' },
+    ],
+  };
+  const THEMES = THEME_DATA.themes;
+  const CUSTOM_THEME_FIELDS = Object.create(null);
+  for (const field of THEME_DATA.customFields || []) {
+    if (field && field.key) CUSTOM_THEME_FIELDS[field.key] = field.value;
+  }
+
   function defaultSettings() {
     const out = {};
     for (const f of FEATURES) out[f.key] = true;
@@ -147,6 +167,28 @@
   }
 
   let settings = defaultSettings();
+
+  function cleanThemeId(value) {
+    return THEMES.some((theme) => theme.id === value) ? value : 'default';
+  }
+
+  let selectedTheme = 'default';
+
+  function isHexColor(value) {
+    return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+  }
+
+  function cleanCustomTheme(value) {
+    const out = { ...CUSTOM_THEME_FIELDS };
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const key of Object.keys(CUSTOM_THEME_FIELDS)) {
+        if (isHexColor(value[key])) out[key] = value[key].toLowerCase();
+      }
+    }
+    return out;
+  }
+
+  let customTheme = cleanCustomTheme(null);
 
   const MAX_GIF_FAVORITES = 200;
 
@@ -267,12 +309,16 @@
      `let` further down but already initialized by the time this callback
      runs, since a promise callback can't fire until the whole synchronous
      script body — every `let` in it — has finished executing. */
-  storageGet(['volumes', 'recents', 'nicknames', 'gifFavorites', 'settings']).then((r) => {
+  storageGet(['volumes', 'recents', 'nicknames', 'nicknameUsers', 'gifFavorites', 'settings', 'theme', 'customTheme']).then((r) => {
     volumes = cleanVolumes(r && r.volumes);
     recents = cleanRecents(r && r.recents);
     nicknames = cleanNicknames(r && r.nicknames);
+    nicknameUsers = cleanNicknameUsers(r && r.nicknameUsers);
     gifFavorites = cleanGifFavorites(r && r.gifFavorites);
     settings = cleanSettings(r && r.settings);
+    selectedTheme = cleanThemeId(r && r.theme);
+    customTheme = cleanCustomTheme(r && r.customTheme);
+    applyChattoTheme();
     ready = true;
     findCards().forEach(paintCard);
     if (settings.nicknames) {
@@ -280,6 +326,22 @@
       applyNicknamesEverywhere();
     }
   });
+
+  try {
+    API.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes) return;
+      let changed = false;
+      if (changes.theme) {
+        selectedTheme = cleanThemeId(changes.theme.newValue);
+        changed = true;
+      }
+      if (changes.customTheme) {
+        customTheme = cleanCustomTheme(changes.customTheme.newValue);
+        changed = true;
+      }
+      if (changed) applyChattoTheme(true);
+    });
+  } catch (_) { /* live theme changes are a convenience; startup still applies it */ }
 
   let saveTimer = null;
   function saveSoon() {
@@ -659,9 +721,8 @@
      extension can call to actually rename someone server-side, and this
      never claims to — it is a purely local, visual relabeling that only the
      person who set it ever sees. Nicknames are stored keyed by the
-     person's real display name, the same convention (and the same
-     duplicate-name caveat — see SECURITY-REVIEW.md) already used for
-     per-participant volume levels.
+     person's stable user id when Chatto exposes one, with display names kept
+     as a fallback for older saved data and DOM shapes that do not expose ids.
 
      Currently applied only to call participant cards, the one place this
      extension already has solid, tested control over card DOM structure.
@@ -685,8 +746,82 @@
     return out;
   }
 
+  function cleanId(value) {
+    if (typeof value !== 'string') return null;
+    const id = value.trim();
+    return id && id.length <= 160 && /^[A-Za-z0-9._:@-]+$/.test(id) ? id : null;
+  }
+
+  function cleanNicknameUsers(value) {
+    const out = Object.create(null);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+    let n = 0;
+    for (const key of Object.keys(value)) {
+      if (n >= MAX_NICKNAMES) break;
+      const id = cleanId(key);
+      const row = value[key];
+      if (!id || !row || typeof row !== 'object' || Array.isArray(row)) continue;
+      const name = cleanName(row.name);
+      const nick = cleanName(row.nickname);
+      if (nick) { out[id] = { name: name || '', nickname: nick }; n++; }
+    }
+    return out;
+  }
+
   // Populated by the combined storageGet() near the top of this file.
   let nicknames = Object.create(null);
+  let nicknameUsers = Object.create(null);
+
+  const USER_ID_ATTRS = [
+    'data-user-id',
+    'data-author-id',
+    'data-member-id',
+    'data-profile-user-id',
+    'data-call-participant-id',
+    'data-participant-id',
+    'data-participant-identity',
+  ];
+
+  function directUserIdOf(el) {
+    if (!el) return null;
+    for (const attr of USER_ID_ATTRS) {
+      const id = cleanId(el.getAttribute && el.getAttribute(attr));
+      if (id) return id;
+    }
+    return null;
+  }
+
+  function userIdOf(el) {
+    if (!el) return null;
+    let n = el;
+    for (let i = 0; n && i < 5; i++, n = n.parentElement) {
+      const id = directUserIdOf(n);
+      if (id) return id;
+    }
+    const child = qsa(USER_ID_ATTRS.map((attr) => '[' + attr + ']').join(','), el)[0];
+    return directUserIdOf(child);
+  }
+
+  function localUserId() {
+    return resolveOne('meId', [
+      ['identity-card', () => userIdOf(qs('[data-testid="current-user-identity-card"]'))],
+      ['identity-text', () => userIdOf(qs('[data-testid="current-user-identity-text"]'))],
+      ['mention-self', () => directUserIdOf(qs('.mention-self[data-user-id]'))],
+      ['local-card', () => userIdOf(qs('[data-testid="call-participant-card"][data-local="true"], [data-local-participant="true"]'))],
+    ]);
+  }
+
+  function isLocalIdentity(real, id) {
+    const myId = localUserId();
+    if (id && myId) return id === myId;
+    const me = localUserName();
+    return !!(real && me && stripTrailingDecoration(real) === stripTrailingDecoration(me));
+  }
+
+  function nicknameFor(real, id) {
+    if (id && nicknameUsers[id] && nicknameUsers[id].nickname) return nicknameUsers[id].nickname;
+    return real && nicknames[real] ? nicknames[real] : null;
+  }
 
   function findProfilePopovers() {
     return cached('profilePopovers', () => resolveMany('profilePopover', [
@@ -725,12 +860,14 @@
 
     const realName = realNameFromPopover(popover);
     if (!realName) return;
+    const userId = userIdOf(popover);
+    if (isLocalIdentity(realName, userId)) return;
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'ce-rename-input';
     input.placeholder = 'Nickname — only visible to you';
-    input.value = nicknames[realName] || '';
+    input.value = nicknameFor(realName, userId) || '';
     input.maxLength = MAX_NAME_LEN;
 
     const confirmBtn = document.createElement('button');
@@ -747,9 +884,15 @@
 
     const save = () => {
       const nick = cleanName(input.value);
-      if (nick) nicknames[realName] = nick;
-      else delete nicknames[realName];
-      storageSet({ nicknames });
+      if (userId) {
+        if (nick) nicknameUsers[userId] = { name: realName, nickname: nick };
+        else delete nicknameUsers[userId];
+      } else if (nick) {
+        nicknames[realName] = nick;
+      } else {
+        delete nicknames[realName];
+      }
+      storageSet({ nicknames, nicknameUsers });
       findCards().forEach(applyNickname);
       applyNicknamesEverywhere();
       row.remove();
@@ -774,6 +917,12 @@
 
   function addRenameButtons() {
     for (const popover of findProfilePopovers()) {
+      const realName = realNameFromPopover(popover);
+      if (isLocalIdentity(realName, userIdOf(popover))) {
+        popover.querySelector('.ce-rename-btn')?.remove();
+        popover.querySelector('.ce-rename-field')?.remove();
+        continue;
+      }
       if (popover.querySelector('.ce-rename-btn')) continue;
       const sendBtn = qsa('.sidebar-item', popover).find((b) => b.textContent.trim() === 'Send Message');
       if (!sendBtn || !sendBtn.parentElement) continue;
@@ -808,9 +957,9 @@
       touches target's own textContent, so re-reading it later (as
       applyNicknameToMessageAuthor does, since it has no other source for
       the real name) always still returns the real name, hidden or not. */
-  function swapNameDisplay(target, real) {
+  function swapNameDisplay(target, real, id) {
     if (!target || !real) return;
-    const nick = nicknames[real];
+    const nick = isLocalIdentity(real, id) ? null : nicknameFor(real, id);
     const existing = target.nextElementSibling;
     const label = existing && existing.classList && existing.classList.contains('ce-nick-label')
       ? existing : null;
@@ -839,7 +988,7 @@
   }
 
   function applyNickname(card) {
-    swapNameDisplay(card.querySelector('span, p, h1, h2, h3, h4'), nameOf(card));
+    swapNameDisplay(card.querySelector('span, p, h1, h2, h3, h4'), nameOf(card), userIdOf(card));
   }
 
   /* --- extending nicknames to the rest of the app -------------------------
@@ -861,7 +1010,7 @@
     const prefix = 'View profile of ';
     if (!title.startsWith(prefix)) return;
     const real = title.slice(prefix.length).trim();
-    swapNameDisplay(qs('span.min-w-0.truncate', btn), real);
+    swapNameDisplay(qs('span.min-w-0.truncate', btn), real, userIdOf(btn));
   }
 
   /** Message author name: the bold, underlined-on-hover name button shown
@@ -879,7 +1028,7 @@
   function applyNicknameToMessageAuthor(btn) {
     const nameEl = btn.querySelector('span');
     if (!nameEl || nameEl.classList.contains('ce-nick-label')) return;
-    swapNameDisplay(nameEl, nameEl.textContent.trim());
+    swapNameDisplay(nameEl, nameEl.textContent.trim(), userIdOf(btn));
   }
 
   /** Direct-message list entry. `a.sidebar-item` alone is too broad (it
@@ -892,7 +1041,7 @@
   function applyNicknameToDmEntry(a) {
     const nameEl = qs(':scope > span.flex-1.truncate', a);
     if (!nameEl || nameEl.classList.contains('ce-nick-label')) return;
-    swapNameDisplay(nameEl, nameEl.textContent.trim());
+    swapNameDisplay(nameEl, nameEl.textContent.trim(), userIdOf(a));
   }
 
   function applyNicknamesEverywhere() {
@@ -911,7 +1060,7 @@
       emoji along with the name — that was the actual cause of local-card
       detection permanently failing on live Chatto, not a loading race. */
   function localUserName() {
-    return cached('me', () => resolveOne('me', [
+    return resolveOne('me', [
       ['testid-name-span', () => {
         const el = qs('[data-testid="current-user-identity-text"]');
         const nameSpan = el && el.firstElementChild && el.firstElementChild.firstElementChild;
@@ -931,7 +1080,7 @@
         const c = qs('[data-testid="call-participant-card"][data-local="true"], [data-local-participant="true"]');
         return c ? nameOf(c) : null;
       }],
-    ]));
+    ]);
   }
 
   /** Chatto decorates the "this is you" sidebar label (the element matched
@@ -965,14 +1114,14 @@
     if (card.getAttribute('data-local') === 'true' ||
         card.getAttribute('data-local-participant') === 'true') return true;
 
+    const myId = localUserId();
+    const cardUserId = userIdOf(card);
+    if (myId && cardUserId) return myId === cardUserId;
+
     const marker = qs('[data-testid="call-participant-card"][data-local="true"], [data-local-participant="true"]');
     if (marker && marker !== card) {
-      const markerId = marker.getAttribute('data-call-participant-id') ||
-                        marker.getAttribute('data-participant-id') ||
-                        marker.getAttribute('data-participant-identity');
-      const cardId = card.getAttribute('data-call-participant-id') ||
-                     card.getAttribute('data-participant-id') ||
-                     card.getAttribute('data-participant-identity');
+      const markerId = userIdOf(marker);
+      const cardId = userIdOf(card);
       if (markerId && cardId) return markerId === cardId;
     }
 
@@ -1007,7 +1156,17 @@
            card.getAttribute('aria-pressed') === 'speaking';
   }
 
-  const getVol = (name) => (name in volumes ? volumes[name] : 1);
+  function volumeKeyForCard(card) {
+    const id = userIdOf(card);
+    return id ? 'user:' + id : nameOf(card);
+  }
+
+  function volumeForCard(card) {
+    const key = volumeKeyForCard(card);
+    if (key in volumes) return volumes[key];
+    const oldNameKey = nameOf(card);
+    return oldNameKey in volumes ? volumes[oldNameKey] : 1;
+  }
 
   /** The slider position (0-1, what's stored and shown as a percentage) is
       not what actually gets sent as the audio element's gain — human
@@ -1047,7 +1206,7 @@
   const MAX_BRIDGE_JSON = 20000;
 
   let audioIds = [];           // element ids, best known ordering
-  let mapping = Object.create(null); // participant name -> audio element id
+  let mapping = Object.create(null); // participant identity key -> audio element id
   let orderConfirmed = false;  // have we seen a full sweep yet?
   let pageReady = false;
   let fallbackInjected = false;
@@ -1257,7 +1416,7 @@
     // Pair them off in order. If the counts disagree we only trust the
     // overlap rather than guessing.
     const n = Math.min(cards.length, audioIds.length);
-    for (let i = 0; i < n; i++) next[nameOf(cards[i])] = audioIds[i];
+    for (let i = 0; i < n; i++) next[volumeKeyForCard(cards[i])] = audioIds[i];
     mapping = next;
     window.__ceMapping = mapping;
     if (window.__ceDebugOn) {
@@ -1279,7 +1438,7 @@
      passed. It now asks for relative dominance instead, which is robust to a
      raised noise floor. */
 
-  const voiceScore = {};        // name -> { elementId: agreements }
+  const voiceScore = {};        // participant identity key -> { elementId: agreements }
   const VOICE_CONFIRM = 3;
   const SOUND_FLOOR = 0.02;
   const DOMINANCE = 2.5;        // loudest must beat runner-up by this factor
@@ -1298,10 +1457,11 @@
     if (top < SOUND_FLOOR) return;
     if (ranked.length > 1 && top < runnerUp * DOMINANCE) return;
 
+    const key = volumeKeyForCard(speaking[0]);
     const name = nameOf(speaking[0]);
-    if (mapping[name] === id) return;      // already known
+    if (mapping[key] === id) return;      // already known
 
-    const s = (voiceScore[name] = voiceScore[name] || {});
+    const s = (voiceScore[key] = voiceScore[key] || {});
     s[id] = (s[id] || 0) + 1;
     if (s[id] < VOICE_CONFIRM) return;
 
@@ -1309,7 +1469,7 @@
     for (const other of Object.keys(mapping)) {
       if (mapping[other] === id) delete mapping[other];
     }
-    mapping[name] = id;
+    mapping[key] = id;
     orderConfirmed = true;
     log('matched ' + name + ' to their voice');
     window.__ceMapping = mapping;
@@ -1318,22 +1478,26 @@
 
   /** Element id for a card: the learned mapping, else its position. */
   function idForCard(card) {
-    const name = nameOf(card);
-    if (mapping[name]) return mapping[name];
+    const key = volumeKeyForCard(card);
+    if (mapping[key]) return mapping[key];
     const i = remoteCards().indexOf(card);
     return i >= 0 && i < audioIds.length ? audioIds[i] : null;
   }
 
   function applyVolumes() {
-    for (const [name, id] of Object.entries(mapping)) {
-      send('set', { id, factor: perceptualGain(name in volumes ? volumes[name] : 1) });
+    const byKey = Object.create(null);
+    for (const card of remoteCards()) byKey[volumeKeyForCard(card)] = card;
+    for (const [key, id] of Object.entries(mapping)) {
+      const card = byKey[key];
+      const value = card ? volumeForCard(card) : (key in volumes ? volumes[key] : 1);
+      send('set', { id, factor: perceptualGain(value) });
     }
   }
 
   function paintCard(card) {
     const wrap = card.querySelector('.ce-vol');
     if (!wrap) return;
-    const v = getVol(nameOf(card));
+    const v = volumeForCard(card);
     const pct = Math.round(v * 100);
     wrap.querySelector('.ce-vol-fill').style.width = pct + '%';
     wrap.querySelector('.ce-vol-knob').style.left = pct + '%';
@@ -1348,7 +1512,7 @@
     // storage and in the badge.
     v = Math.round(Math.max(0, Math.min(1, v)) * 100) / 100;
     const name = nameOf(card);
-    volumes[name] = v;
+    volumes[volumeKeyForCard(card)] = v;
     paintCard(card);
     const id = idForCard(card);
     if (id) send('set', { id, factor: perceptualGain(v) });
@@ -3156,8 +3320,291 @@
     b: Math.max(0, Math.min(255, c.b + d)),
   });
 
+  const THEME_STYLE_ID = 'ce-chatto-theme-style';
   let themeKey = '';
+
+  function hexToRgb(value) {
+    if (!isHexColor(value)) return { r: 0, g: 0, b: 0 };
+    return {
+      r: parseInt(value.slice(1, 3), 16),
+      g: parseInt(value.slice(3, 5), 16),
+      b: parseInt(value.slice(5, 7), 16),
+    };
+  }
+
+  function rgbToHex(c) {
+    const part = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+    return '#' + part(c.r) + part(c.g) + part(c.b);
+  }
+
+  function mixHex(a, b, amount) {
+    const ca = hexToRgb(a);
+    const cb = hexToRgb(b);
+    return rgbToHex({
+      r: ca.r + (cb.r - ca.r) * amount,
+      g: ca.g + (cb.g - ca.g) * amount,
+      b: ca.b + (cb.b - ca.b) * amount,
+    });
+  }
+
+  function customPalette() {
+    const base = cleanCustomTheme(customTheme);
+    const light = luminance(hexToRgb(base.background)) > 0.5;
+    return {
+      scheme: light ? 'light' : 'dark',
+      background: base.background,
+      surface: base.surface,
+      surface100: base.surface100,
+      surface200: mixHex(base.surface100, base.text, 0.08),
+      text: base.text,
+      muted: base.muted,
+      border: mixHex(base.surface100, base.accent, 0.35),
+      accent: base.accent,
+      primary: base.accent,
+      success: '#36c878',
+      danger: '#e65f66',
+      warning: '#e2b75d',
+      strongText: light ? '#ffffff' : base.background,
+    };
+  }
+
+  function themeById(id) {
+    if (id === 'custom') return { id: 'custom', label: 'Custom', colors: customPalette() };
+    return THEMES.find((theme) => theme.id === id) || THEMES[0];
+  }
+
+  function setExtensionPalette(colors) {
+    const root = document.documentElement.style;
+    root.setProperty('--ce-panel', colors.surface);
+    root.setProperty('--ce-panel-2', colors.surface100);
+    root.setProperty('--ce-panel-3', colors.surface200);
+    root.setProperty('--ce-text', colors.text);
+    root.setProperty('--ce-dim', colors.muted);
+    root.setProperty('--ce-line', colors.border);
+    root.setProperty('--ce-accent', colors.accent);
+    root.setProperty('--ce-accent-dim', colors.accent + '59');
+  }
+
+  function themeCss() {
+    return `
+:root.ce-theme-active,
+:root.ce-theme-active body {
+  color-scheme: var(--ce-chatto-color-scheme, dark);
+  scrollbar-color: var(--ce-chatto-surface-200) var(--ce-chatto-background);
+  --color-background: var(--ce-chatto-background);
+  --color-surface: var(--ce-chatto-surface);
+  --color-surface-100: var(--ce-chatto-surface-100);
+  --color-surface-200: var(--ce-chatto-surface-200);
+  --color-text: var(--ce-chatto-text);
+  --color-muted: var(--ce-chatto-muted);
+  --color-border: var(--ce-chatto-border);
+  --color-accent: var(--ce-chatto-accent);
+  --color-primary: var(--ce-chatto-primary);
+  --color-success: var(--ce-chatto-success);
+  --color-danger: var(--ce-chatto-danger);
+  --color-warning: var(--ce-chatto-warning);
+  --background: var(--ce-chatto-background);
+  --surface: var(--ce-chatto-surface);
+  --surface-100: var(--ce-chatto-surface-100);
+  --surface-200: var(--ce-chatto-surface-200);
+  --text: var(--ce-chatto-text);
+  --muted: var(--ce-chatto-muted);
+  --border: var(--ce-chatto-border);
+  --accent: var(--ce-chatto-accent);
+  --primary: var(--ce-chatto-primary);
+}
+:root.ce-theme-active,
+:root.ce-theme-active body,
+:root.ce-theme-active .bg-background { background-color: var(--ce-chatto-background) !important; }
+:root.ce-theme-active *,
+:root.ce-theme-active *::before,
+:root.ce-theme-active *::after {
+  scrollbar-color: var(--ce-chatto-surface-200) var(--ce-chatto-background);
+}
+:root.ce-theme-active *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:root.ce-theme-active *::-webkit-scrollbar-track {
+  background: var(--ce-chatto-background);
+}
+:root.ce-theme-active *::-webkit-scrollbar-thumb {
+  background: var(--ce-chatto-surface-200);
+  border: 2px solid var(--ce-chatto-background);
+  border-radius: 999px;
+}
+:root.ce-theme-active *::-webkit-scrollbar-thumb:hover {
+  background: var(--ce-chatto-accent);
+}
+:root.ce-theme-active .bg-surface { background-color: var(--ce-chatto-surface) !important; }
+:root.ce-theme-active .bg-surface-100,
+:root.ce-theme-active [class~="hover:bg-surface-100"]:hover { background-color: var(--ce-chatto-surface-100) !important; }
+:root.ce-theme-active .bg-surface-200,
+:root.ce-theme-active [class~="hover:bg-surface-200"]:hover { background-color: var(--ce-chatto-surface-200) !important; }
+:root.ce-theme-active [class~="bg-surface-200/70"],
+:root.ce-theme-active [class~="hover:bg-surface-200/70"]:hover { background-color: color-mix(in srgb, var(--ce-chatto-surface-200) 70%, transparent) !important; }
+:root.ce-theme-active [class~="bg-surface-100/40"] { background-color: color-mix(in srgb, var(--ce-chatto-surface-100) 40%, transparent) !important; }
+:root.ce-theme-active .text-text,
+:root.ce-theme-active [class~="hover:text-text"]:hover { color: var(--ce-chatto-text) !important; }
+:root.ce-theme-active .text-muted,
+:root.ce-theme-active [class~="text-text/50"] { color: var(--ce-chatto-muted) !important; }
+:root.ce-theme-active .text-accent,
+:root.ce-theme-active [class~="hover:text-accent"]:hover { color: var(--ce-chatto-accent) !important; }
+:root.ce-theme-active .border-border { border-color: var(--ce-chatto-border) !important; }
+:root.ce-theme-active .ring-background { --tw-ring-color: var(--ce-chatto-background) !important; }
+:root.ce-theme-active .from-background {
+  --tw-gradient-from: var(--ce-chatto-background) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: transparent var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+:root.ce-theme-active .to-background {
+  --tw-gradient-to: var(--ce-chatto-background) var(--tw-gradient-to-position) !important;
+}
+:root.ce-theme-active .from-surface,
+:root.ce-theme-active .from-surface-100 {
+  --tw-gradient-from: var(--ce-chatto-surface-100) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: transparent var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+:root.ce-theme-active .btn-secondary,
+:root.ce-theme-active .pane-header-icon-button,
+:root.ce-theme-active .sidebar-item {
+  color: var(--ce-chatto-muted);
+}
+:root.ce-theme-active .btn-secondary {
+  background-color: var(--ce-chatto-surface-100) !important;
+  border-color: var(--ce-chatto-border) !important;
+}
+:root.ce-theme-active .btn-success {
+  background-color: var(--ce-chatto-success) !important;
+  color: var(--ce-chatto-strong-text) !important;
+}
+:root.ce-theme-active .btn-danger {
+  background-color: var(--ce-chatto-danger) !important;
+  color: var(--ce-chatto-strong-text) !important;
+}
+:root.ce-theme-active .sidebar-item:hover,
+:root.ce-theme-active .sidebar-item[aria-current="page"],
+:root.ce-theme-active .server-gutter-item-active {
+  background-color: var(--ce-chatto-surface-100) !important;
+  color: var(--ce-chatto-text) !important;
+}
+:root.ce-theme-active .prose,
+:root.ce-theme-active .message-content-stack,
+:root.ce-theme-active [contenteditable="true"] {
+  color: var(--ce-chatto-text) !important;
+}
+:root.ce-theme-active input,
+:root.ce-theme-active textarea,
+:root.ce-theme-active select,
+:root.ce-theme-active [contenteditable="true"] {
+  color: var(--ce-chatto-text) !important;
+  caret-color: var(--ce-chatto-accent);
+}
+:root.ce-theme-active input::placeholder,
+:root.ce-theme-active textarea::placeholder,
+:root.ce-theme-active [data-placeholder]::before {
+  color: var(--ce-chatto-muted) !important;
+}
+:root.ce-theme-active .ce-md,
+:root.ce-theme-active .ce-pick,
+:root.ce-theme-active .ce-vol-reset-btn {
+  background-color: var(--ce-chatto-surface) !important;
+  border-color: var(--ce-chatto-border) !important;
+  color: var(--ce-chatto-text) !important;
+}
+:root.ce-theme-active .ce-md-btn:hover,
+:root.ce-theme-active .ce-md-btn.ce-on,
+:root.ce-theme-active .ce-tab:hover,
+:root.ce-theme-active .ce-em:hover,
+:root.ce-theme-active .ce-em:focus-visible {
+  background-color: var(--ce-chatto-surface-100) !important;
+}
+:root.ce-theme-active .ce-pick-search input,
+:root.ce-theme-active .ce-rename-input {
+  background-color: var(--ce-chatto-background) !important;
+  border-color: var(--ce-chatto-border) !important;
+  color: var(--ce-chatto-text) !important;
+}
+:root.ce-theme-active ::selection {
+  background: color-mix(in srgb, var(--ce-chatto-accent) 35%, transparent);
+}
+`;
+  }
+
+  function themeStyleElement() {
+    if (typeof document.getElementById === 'function') return document.getElementById(THEME_STYLE_ID);
+    return qsa('style').find((el) => el.id === THEME_STYLE_ID) || null;
+  }
+
+  function removeChattoTheme() {
+    document.documentElement.classList.remove('ce-theme-active');
+    const style = themeStyleElement();
+    if (style) style.remove();
+    const vars = document.documentElement.style;
+    const removeVar = (name) => {
+      if (vars && typeof vars.removeProperty === 'function') vars.removeProperty(name);
+      else if (vars) delete vars[name];
+    };
+    [
+      '--ce-chatto-background', '--ce-chatto-surface', '--ce-chatto-surface-100',
+      '--ce-chatto-surface-200', '--ce-chatto-text', '--ce-chatto-muted',
+      '--ce-chatto-border', '--ce-chatto-accent', '--ce-chatto-primary',
+      '--ce-chatto-success', '--ce-chatto-danger', '--ce-chatto-warning',
+      '--ce-chatto-strong-text', '--ce-chatto-color-scheme',
+      '--ce-panel', '--ce-panel-2', '--ce-panel-3', '--ce-text', '--ce-dim',
+      '--ce-line', '--ce-accent', '--ce-accent-dim',
+    ].forEach(removeVar);
+    themeKey = '';
+  }
+
+  function applyChattoTheme(force) {
+    const theme = themeById(selectedTheme);
+    if (!theme.colors) {
+      removeChattoTheme();
+      if (force) syncTheme();
+      return;
+    }
+    const key = 'custom:' + theme.id;
+    if (!force && themeKey === key) return;
+    themeKey = key;
+
+    const root = document.documentElement;
+    const vars = root.style;
+    const c = theme.colors;
+    vars.setProperty('--ce-chatto-background', c.background);
+    vars.setProperty('--ce-chatto-surface', c.surface);
+    vars.setProperty('--ce-chatto-surface-100', c.surface100);
+    vars.setProperty('--ce-chatto-surface-200', c.surface200);
+    vars.setProperty('--ce-chatto-text', c.text);
+    vars.setProperty('--ce-chatto-muted', c.muted);
+    vars.setProperty('--ce-chatto-border', c.border);
+    vars.setProperty('--ce-chatto-accent', c.accent);
+    vars.setProperty('--ce-chatto-primary', c.primary);
+    vars.setProperty('--ce-chatto-success', c.success);
+    vars.setProperty('--ce-chatto-danger', c.danger);
+    vars.setProperty('--ce-chatto-warning', c.warning);
+    vars.setProperty('--ce-chatto-strong-text', c.strongText || c.background);
+    vars.setProperty('--ce-chatto-color-scheme', c.scheme || 'dark');
+    setExtensionPalette(c);
+
+    let style = themeStyleElement();
+    if (!style) {
+      style = document.createElement('style');
+      style.id = THEME_STYLE_ID;
+      document.documentElement.appendChild(style);
+    }
+    style.textContent = themeCss();
+    root.classList.add('ce-theme-active');
+    if (window.__ceDebugOn) log('theme applied:', theme.label);
+  }
+
   function syncTheme() {
+    if (selectedTheme !== 'default') {
+      applyChattoTheme();
+      return;
+    }
+
     const inp = findInput();
     const anchor = inp || document.body;
     if (!anchor) return;
@@ -3254,6 +3701,7 @@
     try { closeGifPicker(); } catch (_) {}
     try { removeMdBars(); } catch (_) {}
     try { document.documentElement.classList.remove(DRAG_CLASS); } catch (_) {}
+    try { removeChattoTheme(); } catch (_) {}
   }
 
   window.__ceIsoCleanup = cleanup;
@@ -3288,6 +3736,11 @@
   window.__ceLocalCardTestHooks = {
     isLocalCard, nameOf, localUserName, remoteCards, findCards,
     addSlider, removeSlider, dropCache, inCall, stripTrailingDecoration,
+    userIdOf, localUserId, isLocalIdentity, applyNickname,
+    setNicknamesForTest(nextNames, nextUsers) {
+      nicknames = cleanNicknames(nextNames);
+      nicknameUsers = cleanNicknameUsers(nextUsers);
+    },
   };
   window.__ceDebug = function () {
     window.__ceDebugOn = !window.__ceDebugOn;

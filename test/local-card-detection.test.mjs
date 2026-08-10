@@ -172,6 +172,58 @@ test('forward-looking: duplicate display names are disambiguated by a stable par
     'a remote participant sharing the local display name must still get a slider when ids differ');
 });
 
+test('forward-looking: a shared user id suppresses local controls even when names differ', (t) => {
+  const { document, hooks } = setup(t);
+  const mention = document.createElement('span');
+  mention.className = 'mention-self';
+  mention.setAttribute('data-user-id', 'U-local');
+  mention.textContent = '@You';
+  document.body.appendChild(mention);
+
+  const me = card(document, { name: 'Display name still loading', id: 'U-local' });
+  const remote = card(document, { name: 'Display name still loading', id: 'U-remote' });
+  panelWith(document, [me, remote]);
+
+  hooks.dropCache();
+  assert.equal(hooks.localUserId(), 'U-local');
+  hooks.addSlider(me);
+  hooks.addSlider(remote);
+
+  assert.equal(me.querySelector('.ce-vol'), null);
+  assert.notEqual(remote.querySelector('.ce-vol'), null);
+});
+
+test('local nicknames are not shown on the current user when ids match', (t) => {
+  const { document, hooks } = setup(t);
+  const mention = document.createElement('span');
+  mention.className = 'mention-self';
+  mention.setAttribute('data-user-id', 'U-local');
+  mention.textContent = '@You';
+  document.body.appendChild(mention);
+
+  const me = card(document, { name: 'Sam', id: 'U-local' });
+  const meName = document.createElement('span');
+  meName.textContent = 'Sam';
+  me.appendChild(meName);
+  const remote = card(document, { name: 'Sam', id: 'U-remote' });
+  const remoteName = document.createElement('span');
+  remoteName.textContent = 'Sam';
+  remote.appendChild(remoteName);
+  panelWith(document, [me, remote]);
+
+  hooks.setNicknamesForTest(null, {
+    'U-local': { name: 'Sam', nickname: 'Me Nick' },
+    'U-remote': { name: 'Sam', nickname: 'Remote Nick' },
+  });
+  hooks.dropCache();
+  hooks.applyNickname(me);
+  hooks.applyNickname(remote);
+
+  assert.equal(me.querySelector('.ce-nick-label'), null);
+  assert.equal(meName.classList.contains('ce-name-hidden'), false);
+  assert.equal(remote.querySelector('.ce-nick-label').textContent, 'Remote Nick');
+});
+
 test('known limitation: duplicate names with no marker/id/sidebar mismatch fall back to name matching', (t) => {
   const { document, hooks } = setup(t);
   sidebarIdentity(document, { name: 'Sam' });

@@ -149,6 +149,26 @@ export class FakeElement {
     if (i >= 0) this.children.splice(i, 1);
     child.parentElement = null;
   }
+  insertAdjacentElement(position, el) {
+    if (!this.parentElement || position === 'beforebegin' || position === 'afterend') {
+      if (!this.parentElement) return null;
+      if (el.parentElement) el.parentElement.removeChild(el);
+      const siblings = this.parentElement.children;
+      const i = siblings.indexOf(this);
+      const at = position === 'beforebegin' ? i : i + 1;
+      el.parentElement = this.parentElement;
+      siblings.splice(at, 0, el);
+      return el;
+    }
+    if (position === 'afterbegin') {
+      if (el.parentElement) el.parentElement.removeChild(el);
+      el.parentElement = this;
+      this.children.unshift(el);
+      return el;
+    }
+    if (position === 'beforeend') return this.appendChild(el);
+    return null;
+  }
   remove() { if (this.parentElement) this.parentElement.removeChild(this); }
   get firstElementChild() { return this.children[0] || null; }
   querySelector(sel) { const r = queryAll(this, sel); return r[0] || null; }

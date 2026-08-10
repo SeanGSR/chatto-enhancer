@@ -101,8 +101,11 @@ export function manifestFor(target) {
   if (target === 'chromium') {
     delete manifest.browser_specific_settings;
   } else if (target === 'firefox') {
+    manifest.background = { scripts: ['background.js'] };
     manifest.browser_specific_settings = {
+      ...(manifest.browser_specific_settings || {}),
       gecko: {
+        ...(manifest.browser_specific_settings?.gecko || {}),
         id: buildConfig.geckoId,
         strict_min_version: '140.0',
         data_collection_permissions: { required: ['none'] },

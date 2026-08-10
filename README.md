@@ -17,7 +17,8 @@ For other community Chatto projects, see [awesome-chatto](https://github.com/nic
 - 🖼️ Screen-share pop-out using Picture-in-Picture
 - 🏷️ Local nicknames, visible only to you
 - 🌍 "Enable here" for self-hosted Chatto servers
-- ⚙️ Settings popup with feature toggles and data import/export
+- 🎨 Themes with dark/light presets for OLED, Cappuccino, Midnight, Forest, Rose, Lilac, and Turquoise, plus custom colors
+- ⚙️ Settings popup with feature toggles, themes, and data import/export
 - 🌐 Chromium and Firefox support
 
 ## Screenshots
@@ -42,7 +43,7 @@ For other community Chatto projects, see [awesome-chatto](https://github.com/nic
 
 ## Settings
 
-Click the extension icon to open settings. You can turn each feature on or off and export/import your local data. Reload the Chatto tab after changing settings.
+Click the extension icon to open settings. You can turn each feature on or off, change theme, and export/import your local data. Feature toggles apply after reloading Chatto; theme changes apply automatically.
 
 ## Using it on another Chatto server
 
@@ -54,7 +55,7 @@ For another Chatto server, open that site, click the extension icon, then click 
 
 ### Chromium
 
-1. Download `chatto-enhancer-1.1-chromium.zip`.
+1. Download `chatto-enhancer-1.2-chromium.zip`.
 2. Extract the ZIP.
 3. Open `chrome://extensions`.
 4. Enable Developer Mode.
@@ -65,7 +66,7 @@ To update, extract the new ZIP over the same folder, then click the reload icon 
 
 ### Firefox
 
-1. Download `chatto-enhancer-1.1-firefox.zip`.
+1. Download `chatto-enhancer-1.2-firefox.zip`.
 2. Extract the ZIP.
 3. Open `about:debugging`.
 4. Select "This Firefox".

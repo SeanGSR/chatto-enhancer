@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Chatto Enhancer",
-  "version": "1.1",
-  "description": "Per-person volume sliders in voice calls, an emoji picker, and markdown formatting in the message box.",
+  "version": "1.2",
+  "description": "Themes, per-person volume sliders, emoji, GIFs, markdown controls, and more for Chatto.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -76,6 +76,7 @@
         "https://chat.chatto.run/*"
       ],
       "js": [
+        "theme-data.js",
         "emoji-data.js",
         "content/index.js"
       ],

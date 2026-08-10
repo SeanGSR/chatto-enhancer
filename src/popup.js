@@ -1,13 +1,9 @@
 /* ==========================================================================
    Chatto Enhancer — settings popup
 
-   This list, and cleanSettings()'s shape, must stay identical to the copy
-   in src/content/index.js. They can't share code directly: this file runs
-   in the extension's own popup page, the other inside Chatto's tab as a
-   content script — two separate execution contexts, and this project has
-   no bundler to join them into one module without adding a build
-   dependency the rest of the project deliberately avoids. Small, deliberate
-   duplication was judged cheaper than that.
+   The feature toggle list mirrors src/content/index.js. Theme metadata is
+   shared through src/theme-data.js so palettes and popup swatches cannot
+   drift apart.
    ========================================================================== */
 
 const FEATURES = [
@@ -19,8 +15,31 @@ const FEATURES = [
   { key: 'nicknames', label: 'Local nicknames' },
 ];
 
+const THEME_DATA = window.__CHATTO_ENHANCER_THEME_DATA__ || {
+  themes: [
+    { id: 'default', label: 'Default', swatches: ['#272727', '#343434', '#eaeaef', '#2f9bf5'] },
+    { id: 'custom', label: 'Custom', swatches: ['#211916', '#3a2a24', '#f5e7d4', '#c98a5b'] },
+  ],
+  groups: [
+    { type: 'single', ids: ['default'] },
+    { type: 'single', ids: ['custom'] },
+  ],
+  customFields: [
+    { key: 'background', label: 'Back', value: '#211916' },
+    { key: 'surface', label: 'Panel', value: '#2b211d' },
+    { key: 'surface100', label: 'Item', value: '#3a2a24' },
+    { key: 'text', label: 'Text', value: '#f5e7d4' },
+    { key: 'muted', label: 'Muted', value: '#b99f8e' },
+    { key: 'accent', label: 'Accent', value: '#c98a5b' },
+  ],
+};
+const THEMES = THEME_DATA.themes;
+const THEME_GROUPS = THEME_DATA.groups;
+const CUSTOM_THEME_FIELDS = THEME_DATA.customFields;
+
 const API = (typeof browser !== 'undefined' && browser && browser.storage) ? browser : chrome;
 const PROMISE_API = (typeof browser !== 'undefined' && browser && browser.storage) ? true : false;
+const BUILTIN_ORIGINS = new Set(['https://chat.chatto.run']);
 
 function storageGet(keys) {
   return new Promise((resolve) => {
@@ -65,9 +84,76 @@ function cleanSettings(value) {
   return out;
 }
 
+function cleanThemeId(value) {
+  return THEMES.some((theme) => theme.id === value) ? value : 'default';
+}
+
+function themeById(id) {
+  return THEMES.find((theme) => theme.id === id) || THEMES[0];
+}
+
+function svgIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const paths = name === 'sun'
+    ? [
+      ['circle', { cx: '12', cy: '12', r: '4' }],
+      ['path', { d: 'M12 2v2' }],
+      ['path', { d: 'M12 20v2' }],
+      ['path', { d: 'm4.93 4.93 1.41 1.41' }],
+      ['path', { d: 'm17.66 17.66 1.41 1.41' }],
+      ['path', { d: 'M2 12h2' }],
+      ['path', { d: 'M20 12h2' }],
+      ['path', { d: 'm6.34 17.66-1.41 1.41' }],
+      ['path', { d: 'm19.07 4.93-1.41 1.41' }],
+    ]
+    : name === 'pen'
+      ? [
+        ['path', { d: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z' }],
+        ['path', { d: 'm15 5 4 4' }],
+      ]
+    : [
+      ['path', { d: 'M12 3a6 6 0 0 0 9 7.5A9 9 0 1 1 12 3Z' }],
+    ];
+  for (const [tag, attrs] of paths) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+function isHexColor(value) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
+function defaultCustomTheme() {
+  const out = {};
+  for (const field of CUSTOM_THEME_FIELDS) out[field.key] = field.value;
+  return out;
+}
+
+function cleanCustomTheme(value) {
+  const out = defaultCustomTheme();
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const field of CUSTOM_THEME_FIELDS) {
+      if (isHexColor(value[field.key])) out[field.key] = value[field.key].toLowerCase();
+    }
+  }
+  return out;
+}
+
 async function init() {
-  const r = await storageGet(['settings']);
+  const r = await storageGet(['settings', 'theme', 'customTheme']);
   const settings = cleanSettings(r.settings);
+  let selectedTheme = cleanThemeId(r.theme);
+  const customTheme = cleanCustomTheme(r.customTheme);
   const container = document.getElementById('toggles');
 
   for (const f of FEATURES) {
@@ -83,6 +169,105 @@ async function init() {
     label.appendChild(document.createTextNode(f.label));
     container.appendChild(label);
   }
+
+  const themeChoices = document.getElementById('themeChoices');
+  const customThemePanel = document.getElementById('customTheme');
+  const themeButtons = new Map();
+  const customSwatches = [];
+  const paintCustomSwatches = () => {
+    const values = [
+      customTheme.background,
+      customTheme.surface100,
+      customTheme.text,
+      customTheme.accent,
+    ];
+    customSwatches.forEach((swatch, index) => { swatch.style.background = values[index]; });
+  };
+  const paintThemeButtons = () => {
+    for (const [id, button] of themeButtons) {
+      button.setAttribute('aria-pressed', id === selectedTheme ? 'true' : 'false');
+    }
+    customThemePanel.style.display = selectedTheme === 'custom' ? 'grid' : 'none';
+  };
+
+  function themeButton(theme, mode) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'theme-option';
+    if (mode) button.classList.add('theme-option-' + mode);
+    button.setAttribute('aria-pressed', 'false');
+    const name = document.createElement('span');
+    name.className = 'theme-name';
+    if (mode) name.appendChild(svgIcon(mode));
+    name.appendChild(document.createTextNode(theme.buttonLabel || theme.label));
+    button.appendChild(name);
+    const swatches = document.createElement('span');
+    swatches.className = 'theme-swatches';
+    for (const color of theme.swatches) {
+      const swatch = document.createElement('span');
+      swatch.className = 'theme-swatch';
+      swatch.style.background = color;
+      if (theme.id === 'custom') customSwatches.push(swatch);
+      swatches.appendChild(swatch);
+    }
+    button.appendChild(swatches);
+    button.addEventListener('click', () => {
+      selectedTheme = theme.id;
+      storageSet({ theme: selectedTheme });
+      paintThemeButtons();
+    });
+    themeButtons.set(theme.id, button);
+    return button;
+  }
+
+  for (const group of THEME_GROUPS) {
+    if (group.type === 'pair') {
+      const title = document.createElement('div');
+      title.className = 'theme-family';
+      title.textContent = group.name;
+      themeChoices.appendChild(title);
+    }
+    const row = document.createElement('div');
+    row.className = group.type === 'pair' ? 'theme-row theme-row-pair' : 'theme-row';
+    if (group.ids.includes('custom')) row.classList.add('theme-row-custom');
+    for (const id of group.ids) {
+      const theme = themeById(id);
+      const mode = id === 'custom' ? 'pen' : id.endsWith('-light') ? 'sun' : id === 'default' ? null : 'moon';
+      row.appendChild(themeButton(theme, mode));
+    }
+    if (group.ids.includes('custom')) row.appendChild(customThemePanel);
+    themeChoices.appendChild(row);
+  }
+
+  for (const field of CUSTOM_THEME_FIELDS) {
+    const label = document.createElement('label');
+    label.className = 'color-field';
+    const text = document.createElement('span');
+    text.textContent = field.label;
+    const colorWrap = document.createElement('span');
+    colorWrap.className = 'color-picker';
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = customTheme[field.key];
+    const value = document.createElement('span');
+    value.className = 'color-value';
+    value.textContent = input.value;
+    input.addEventListener('input', () => {
+      customTheme[field.key] = input.value;
+      value.textContent = input.value;
+      selectedTheme = 'custom';
+      storageSet({ theme: selectedTheme, customTheme });
+      paintCustomSwatches();
+      paintThemeButtons();
+    });
+    label.appendChild(text);
+    colorWrap.appendChild(input);
+    label.appendChild(colorWrap);
+    label.appendChild(value);
+    customThemePanel.appendChild(label);
+    paintCustomSwatches();
+  }
+  paintThemeButtons();
 }
 
 /* --- export / import --------------------------------------------------
@@ -100,7 +285,7 @@ async function init() {
    use or an import — the real validation gate already exists downstream,
    so duplicating it here (in a separate execution context, the same
    duplication problem noted for FEATURES above) would just be redundant. */
-const DATA_KEYS = ['volumes', 'recents', 'nicknames', 'gifFavorites', 'settings'];
+const DATA_KEYS = ['volumes', 'recents', 'nicknames', 'nicknameUsers', 'gifFavorites', 'settings', 'theme', 'customTheme'];
 
 function setStatus(text) {
   document.getElementById('dataStatus').textContent = text;
@@ -259,6 +444,11 @@ async function checkThisSite() {
     return;
   }
   const originPattern = `${origin}/*`;
+
+  if (BUILTIN_ORIGINS.has(origin)) {
+    setSiteStatus('Enabled by default on this site.');
+    return;
+  }
 
   const already = await API.permissions.contains({ origins: [originPattern] });
   if (already) {

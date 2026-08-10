@@ -33,6 +33,7 @@
    to the bottom edge even if Chatto changes its own layout classes. */
 .ce-card {
   position: relative;
+  padding-bottom: 14px !important;
 }
 
 .ce-vol {
@@ -139,11 +140,6 @@
 
 .ce-vol.ce-muted .ce-vol-badge {
   color: #ff9aa0;
-}
-
-/* Gives the bar somewhere to live without covering the participant's name. */
-.ce-card {
-  padding-bottom: 14px !important;
 }
 
 .ce-vol-reset-btn {
@@ -616,10 +612,8 @@
    visible, like a native app's own formatting toolbar, rather than a popup
    positioned against the selection's rect.
 
-   Background is a fixed colour rather than the synced --ce-panel-2 variable
-   (unlike most of this stylesheet) — picked to match Chatto's own dark theme
-   exactly, at the cost of not adapting to a light theme the way the rest of
-   the UI does. */
+   Uses the synced --ce-* palette so it follows both Chatto's default theme
+   and any Chatto Enhancer custom theme. */
 
 .ce-md {
   display: flex;
@@ -627,7 +621,7 @@
   gap: 2px;
   padding: 4px;
   margin-bottom: 4px;
-  background: #272727;
+  background: var(--ce-panel, #272727);
   border: 1px solid var(--ce-line, rgba(255, 255, 255, 0.1));
   border-radius: 10px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -708,4 +702,3 @@ html.ce-selecting * {
 @media (prefers-reduced-motion: reduce) {
   .ce-md-btn { transition: none; }
 }
-
