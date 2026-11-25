@@ -1,12 +1,9 @@
 {
   "name": "chatto-enhancer",
-  "version": "1.2",
+  "version": "1.3.0",
   "extensionFiles": [
     "manifest.json",
     "background.js",
-    "main-world.js",
-    "theme-data.js",
-    "emoji-data.js",
     "content/index.js",
     "icons/icon-16.png",
     "icons/icon-32.png",
@@ -18,9 +15,6 @@
   ],
   "sourceFiles": {
     "background.js": "src/background.js",
-    "main-world.js": "src/main-world.js",
-    "theme-data.js": "src/theme-data.js",
-    "emoji-data.js": "src/generated/emoji-data.js",
     "content/index.js": "src/content/index.js",
     "icons/icon-16.png": "icons/icon-16.png",
     "icons/icon-32.png": "icons/icon-32.png",

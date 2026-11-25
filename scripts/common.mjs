@@ -93,11 +93,6 @@ export function manifestFor(target) {
     ...script,
     matches: [...buildConfig.hostMatches],
   }));
-  manifest.web_accessible_resources = manifest.web_accessible_resources.map((entry) => ({
-    ...entry,
-    matches: [...buildConfig.hostMatches],
-  }));
-
   if (target === 'chromium') {
     delete manifest.browser_specific_settings;
   } else if (target === 'firefox') {

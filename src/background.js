@@ -168,26 +168,39 @@ function scriptIdsFor(origin) {
 async function registerScriptsForOrigin(origin) {
   const originPattern = `${origin}/*`;
   const { mainId, contentId } = scriptIdsFor(origin);
-  try {
-    await API.scripting.unregisterContentScripts({ ids: [mainId, contentId] });
-  } catch (_) { /* nothing registered yet for this origin — fine */ }
+  // Unregister separately: browsers may reject the whole request when one
+  // supplied id does not exist, leaving the other registration in place.
+  for (const id of [mainId, contentId]) {
+    try { await API.scripting.unregisterContentScripts({ ids: [id] }); }
+    catch (_) { /* nothing registered under this id — fine */ }
+  }
   await API.scripting.registerContentScripts([
     {
-      id: mainId,
-      js: ['main-world.js'],
-      matches: [originPattern],
-      runAt: 'document_start',
-      world: 'MAIN',
-    },
-    {
       id: contentId,
-      js: ['theme-data.js', 'emoji-data.js', 'content/index.js'],
+      js: ['content/index.js'],
       css: ['styles.css'],
       matches: [originPattern],
       runAt: 'document_idle',
     },
   ]);
 }
+
+/* Chatto 0.6 provides volume, formatting, and Picture-in-Picture natively.
+   Version 1.3 no longer needs the page-world hook that implemented those
+   features. Dynamic registrations survive extension updates, so explicitly
+   remove legacy main-world registrations from self-hosted sites as well. */
+async function removeLegacyMainWorldScripts() {
+  let scripts;
+  try { scripts = await API.scripting.getRegisteredContentScripts(); }
+  catch (_) { return; }
+  const ids = (scripts || [])
+    .map((script) => script && script.id)
+    .filter((id) => typeof id === 'string' && id.startsWith('chatto-enhancer-main-'));
+  if (!ids.length) return;
+  try { await API.scripting.unregisterContentScripts({ ids }); } catch (_) {}
+}
+
+removeLegacyMainWorldScripts();
 
 function originFromMatchPattern(pattern) {
   const m = /^([a-z][a-z0-9+.-]*:\/\/[^/]+)\/\*$/i.exec(pattern);

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Chatto Enhancer",
-  "version": "1.2",
-  "description": "Themes, per-person volume sliders, emoji, GIFs, markdown controls, and more for Chatto.",
+  "version": "1.3.0",
+  "description": "Saved messages, templates, GIF collections and local profiles for Chatto 0.6.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -52,10 +52,11 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "main-world.js"
+        "icons/icon-32.png"
       ],
       "matches": [
-        "https://chat.chatto.run/*"
+        "http://*/*",
+        "https://*/*"
       ]
     }
   ],
@@ -65,19 +66,6 @@
         "https://chat.chatto.run/*"
       ],
       "js": [
-        "main-world.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN",
-      "all_frames": false
-    },
-    {
-      "matches": [
-        "https://chat.chatto.run/*"
-      ],
-      "js": [
-        "theme-data.js",
-        "emoji-data.js",
         "content/index.js"
       ],
       "css": [

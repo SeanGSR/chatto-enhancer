@@ -85,7 +85,10 @@ for (const target of targets) {
   }
   for (const entry of manifest.web_accessible_resources || []) {
     for (const file of entry.resources || []) {
-      if (file !== 'main-world.js') fail(`${target} exposes unexpected web-accessible resource: ${file}`);
+      if (file !== 'icons/icon-32.png') fail(`${target} exposes unexpected web-accessible resource: ${file}`);
+    }
+    if (entry.matches?.join(',') !== 'http://*/*,https://*/*') {
+      fail(`${target} web-accessible icon must support explicitly enabled self-hosted Chatto sites`);
     }
   }
 }

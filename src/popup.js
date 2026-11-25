@@ -1,41 +1,15 @@
 /* ==========================================================================
    Chatto Enhancer — settings popup
 
-   The feature toggle list mirrors src/content/index.js. Theme metadata is
-   shared through src/theme-data.js so palettes and popup swatches cannot
-   drift apart.
+   The feature toggle list mirrors content/index.js.
    ========================================================================== */
 
 const FEATURES = [
-  { key: 'volume', label: 'Per-participant volume sliders' },
-  { key: 'emoji', label: 'Emoji picker' },
-  { key: 'gif', label: 'GIF picker' },
-  { key: 'markdown', label: 'Markdown toolbar' },
-  { key: 'pip', label: 'Screen-share pop-out button' },
-  { key: 'nicknames', label: 'Local nicknames' },
+  { key: 'gif', label: 'GIF picker', description: 'Search and insert GIFs from the composer' },
+  { key: 'saved', label: 'Saved messages', description: 'Add private bookmarks to message menus' },
+  { key: 'templates', label: 'Message templates', description: 'Insert reusable text from the composer' },
+  { key: 'nicknames', label: 'Local profiles', description: 'Nicknames, private notes and tags' },
 ];
-
-const THEME_DATA = window.__CHATTO_ENHANCER_THEME_DATA__ || {
-  themes: [
-    { id: 'default', label: 'Default', swatches: ['#272727', '#343434', '#eaeaef', '#2f9bf5'] },
-    { id: 'custom', label: 'Custom', swatches: ['#211916', '#3a2a24', '#f5e7d4', '#c98a5b'] },
-  ],
-  groups: [
-    { type: 'single', ids: ['default'] },
-    { type: 'single', ids: ['custom'] },
-  ],
-  customFields: [
-    { key: 'background', label: 'Back', value: '#211916' },
-    { key: 'surface', label: 'Panel', value: '#2b211d' },
-    { key: 'surface100', label: 'Item', value: '#3a2a24' },
-    { key: 'text', label: 'Text', value: '#f5e7d4' },
-    { key: 'muted', label: 'Muted', value: '#b99f8e' },
-    { key: 'accent', label: 'Accent', value: '#c98a5b' },
-  ],
-};
-const THEMES = THEME_DATA.themes;
-const THEME_GROUPS = THEME_DATA.groups;
-const CUSTOM_THEME_FIELDS = THEME_DATA.customFields;
 
 const API = (typeof browser !== 'undefined' && browser && browser.storage) ? browser : chrome;
 const PROMISE_API = (typeof browser !== 'undefined' && browser && browser.storage) ? true : false;
@@ -84,208 +58,23 @@ function cleanSettings(value) {
   return out;
 }
 
-function cleanThemeId(value) {
-  return THEMES.some((theme) => theme.id === value) ? value : 'default';
-}
-
-function themeById(id) {
-  return THEMES.find((theme) => theme.id === id) || THEMES[0];
-}
-
-function svgIcon(name) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '2');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  const paths = name === 'sun'
-    ? [
-      ['circle', { cx: '12', cy: '12', r: '4' }],
-      ['path', { d: 'M12 2v2' }],
-      ['path', { d: 'M12 20v2' }],
-      ['path', { d: 'm4.93 4.93 1.41 1.41' }],
-      ['path', { d: 'm17.66 17.66 1.41 1.41' }],
-      ['path', { d: 'M2 12h2' }],
-      ['path', { d: 'M20 12h2' }],
-      ['path', { d: 'm6.34 17.66-1.41 1.41' }],
-      ['path', { d: 'm19.07 4.93-1.41 1.41' }],
-    ]
-    : name === 'pen'
-      ? [
-        ['path', { d: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z' }],
-        ['path', { d: 'm15 5 4 4' }],
-      ]
-    : [
-      ['path', { d: 'M12 3a6 6 0 0 0 9 7.5A9 9 0 1 1 12 3Z' }],
-    ];
-  for (const [tag, attrs] of paths) {
-    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-    svg.appendChild(node);
-  }
-  return svg;
-}
-
-function isHexColor(value) {
-  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
-}
-
-function defaultCustomTheme() {
-  const out = {};
-  for (const field of CUSTOM_THEME_FIELDS) out[field.key] = field.value;
-  return out;
-}
-
-function cleanCustomTheme(value) {
-  const out = defaultCustomTheme();
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const field of CUSTOM_THEME_FIELDS) {
-      if (isHexColor(value[field.key])) out[field.key] = value[field.key].toLowerCase();
-    }
-  }
-  return out;
-}
-
-async function init() {
-  const r = await storageGet(['settings', 'theme', 'customTheme']);
-  const settings = cleanSettings(r.settings);
-  let selectedTheme = cleanThemeId(r.theme);
-  const customTheme = cleanCustomTheme(r.customTheme);
-  const container = document.getElementById('toggles');
-
-  for (const f of FEATURES) {
-    const label = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = settings[f.key];
-    input.addEventListener('change', () => {
-      settings[f.key] = input.checked;
-      storageSet({ settings });
-    });
-    label.appendChild(input);
-    label.appendChild(document.createTextNode(f.label));
-    container.appendChild(label);
-  }
-
-  const themeChoices = document.getElementById('themeChoices');
-  const customThemePanel = document.getElementById('customTheme');
-  const themeButtons = new Map();
-  const customSwatches = [];
-  const paintCustomSwatches = () => {
-    const values = [
-      customTheme.background,
-      customTheme.surface100,
-      customTheme.text,
-      customTheme.accent,
-    ];
-    customSwatches.forEach((swatch, index) => { swatch.style.background = values[index]; });
-  };
-  const paintThemeButtons = () => {
-    for (const [id, button] of themeButtons) {
-      button.setAttribute('aria-pressed', id === selectedTheme ? 'true' : 'false');
-    }
-    customThemePanel.style.display = selectedTheme === 'custom' ? 'grid' : 'none';
-  };
-
-  function themeButton(theme, mode) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'theme-option';
-    if (mode) button.classList.add('theme-option-' + mode);
-    button.setAttribute('aria-pressed', 'false');
-    const name = document.createElement('span');
-    name.className = 'theme-name';
-    if (mode) name.appendChild(svgIcon(mode));
-    name.appendChild(document.createTextNode(theme.buttonLabel || theme.label));
-    button.appendChild(name);
-    const swatches = document.createElement('span');
-    swatches.className = 'theme-swatches';
-    for (const color of theme.swatches) {
-      const swatch = document.createElement('span');
-      swatch.className = 'theme-swatch';
-      swatch.style.background = color;
-      if (theme.id === 'custom') customSwatches.push(swatch);
-      swatches.appendChild(swatch);
-    }
-    button.appendChild(swatches);
-    button.addEventListener('click', () => {
-      selectedTheme = theme.id;
-      storageSet({ theme: selectedTheme });
-      paintThemeButtons();
-    });
-    themeButtons.set(theme.id, button);
-    return button;
-  }
-
-  for (const group of THEME_GROUPS) {
-    if (group.type === 'pair') {
-      const title = document.createElement('div');
-      title.className = 'theme-family';
-      title.textContent = group.name;
-      themeChoices.appendChild(title);
-    }
-    const row = document.createElement('div');
-    row.className = group.type === 'pair' ? 'theme-row theme-row-pair' : 'theme-row';
-    if (group.ids.includes('custom')) row.classList.add('theme-row-custom');
-    for (const id of group.ids) {
-      const theme = themeById(id);
-      const mode = id === 'custom' ? 'pen' : id.endsWith('-light') ? 'sun' : id === 'default' ? null : 'moon';
-      row.appendChild(themeButton(theme, mode));
-    }
-    if (group.ids.includes('custom')) row.appendChild(customThemePanel);
-    themeChoices.appendChild(row);
-  }
-
-  for (const field of CUSTOM_THEME_FIELDS) {
-    const label = document.createElement('label');
-    label.className = 'color-field';
-    const text = document.createElement('span');
-    text.textContent = field.label;
-    const colorWrap = document.createElement('span');
-    colorWrap.className = 'color-picker';
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = customTheme[field.key];
-    const value = document.createElement('span');
-    value.className = 'color-value';
-    value.textContent = input.value;
-    input.addEventListener('input', () => {
-      customTheme[field.key] = input.value;
-      value.textContent = input.value;
-      selectedTheme = 'custom';
-      storageSet({ theme: selectedTheme, customTheme });
-      paintCustomSwatches();
-      paintThemeButtons();
-    });
-    label.appendChild(text);
-    colorWrap.appendChild(input);
-    label.appendChild(colorWrap);
-    label.appendChild(value);
-    customThemePanel.appendChild(label);
-    paintCustomSwatches();
-  }
-  paintThemeButtons();
-}
-
 /* --- export / import --------------------------------------------------
    Nothing here syncs across browsers or profiles on its own, so this is a
-   plain-file way to carry it over: volumes, recent emoji, nicknames, GIF
-   favorites, and these feature toggles.
+   plain-file way to carry it over: nicknames, GIF favorites, and these
+   feature toggles.
 
    Import only checks that the file is valid JSON and copies through the
    known top-level keys — it does not re-validate what's inside each one
-   (that every value is a real number, every name under the length limit,
-   and so on). It doesn't need to: src/content/index.js already re-runs
-   every value read from storage.local through its own cleanVolumes() /
-   cleanNicknames() / cleanGifFavorites() / cleanSettings() the next time
+   (names, URLs, and so on). It doesn't need to: content/index.js
+   re-validates every value read from storage.local the next time
    Chatto's tab loads, regardless of whether that data arrived via normal
    use or an import — the real validation gate already exists downstream,
    so duplicating it here (in a separate execution context, the same
    duplication problem noted for FEATURES above) would just be redundant. */
-const DATA_KEYS = ['volumes', 'recents', 'nicknames', 'nicknameUsers', 'gifFavorites', 'settings', 'theme', 'customTheme'];
+const DATA_KEYS = [
+  'nicknames', 'nicknameUsers', 'userNotes', 'savedMessages', 'templates',
+  'gifFavorites', 'gifRecent', 'gifCollections', 'settings',
+];
 
 function setStatus(text) {
   document.getElementById('dataStatus').textContent = text;
@@ -329,7 +118,7 @@ function importData(file) {
       return;
     }
     storageSet(toWrite);
-    setStatus('Imported — reload Chatto\'s tab to apply.');
+    setStatus('Imported.');
   };
   reader.onerror = () => setStatus('Could not read that file.');
   reader.readAsText(file);
@@ -390,21 +179,15 @@ async function registerScriptsFor(origin) {
   // of the two scripts had never actually registered. That silent failure
   // is exactly what caused permission to show as granted while nothing
   // actually ran on the page.
-  try {
-    await API.scripting.unregisterContentScripts({ ids: [mainId, contentId] });
-  } catch (_) { /* nothing registered yet for this origin — fine */ }
+  for (const id of [mainId, contentId]) {
+    try { await API.scripting.unregisterContentScripts({ ids: [id] }); }
+    catch (_) { /* nothing registered under this id — fine */ }
+  }
 
   await API.scripting.registerContentScripts([
     {
-      id: mainId,
-      js: ['main-world.js'],
-      matches: [originPattern],
-      runAt: 'document_start',
-      world: 'MAIN',
-    },
-    {
       id: contentId,
-      js: ['theme-data.js', 'emoji-data.js', 'content/index.js'],
+      js: ['content/index.js'],
       css: ['styles.css'],
       matches: [originPattern],
       runAt: 'document_idle',
@@ -413,14 +196,14 @@ async function registerScriptsFor(origin) {
 }
 
 async function isFullyRegistered(origin) {
-  const { mainId, contentId } = scriptIdsFor(origin);
+  const { contentId } = scriptIdsFor(origin);
   let registered;
   try {
-    registered = await API.scripting.getRegisteredContentScripts({ ids: [mainId, contentId] });
+    registered = await API.scripting.getRegisteredContentScripts({ ids: [contentId] });
   } catch (_) {
     return false;
   }
-  return Array.isArray(registered) && registered.length === 2;
+  return Array.isArray(registered) && registered.length === 1;
 }
 
 async function checkThisSite() {
@@ -572,4 +355,37 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-init();
+async function initFeatures() {
+  const r = await storageGet(['settings']);
+  const settings = cleanSettings(r.settings);
+  const container = document.getElementById('toggles');
+  for (const feature of FEATURES) {
+    const label = document.createElement('label');
+    label.className = 'setting-row';
+    const copy = document.createElement('span');
+    copy.className = 'setting-copy';
+    const name = document.createElement('span');
+    name.className = 'setting-name';
+    name.textContent = feature.label;
+    const description = document.createElement('span');
+    description.className = 'setting-description';
+    description.textContent = feature.description;
+    copy.append(name, description);
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = settings[feature.key];
+    input.setAttribute('role', 'switch');
+    input.setAttribute('aria-label', feature.label);
+    input.addEventListener('change', () => {
+      settings[feature.key] = input.checked;
+      storageSet({ settings });
+    });
+    const track = document.createElement('span');
+    track.className = 'switch';
+    track.setAttribute('aria-hidden', 'true');
+    label.append(copy, input, track);
+    container.appendChild(label);
+  }
+}
+
+initFeatures();

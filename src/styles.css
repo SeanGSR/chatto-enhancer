@@ -1,704 +1,360 @@
-/* ==========================================================================
-   Chatto Enhancer — all selectors namespaced with .ce- so nothing can
-   collide with Chatto's own Tailwind classes.
-
-   Colours are sampled from Chatto's dark theme so the additions read as
-   part of the app rather than bolted on.
-   ========================================================================== */
-
+/* Chatto Enhancer 1.3 — personal library for Chatto 0.6. */
 :root {
-  --ce-accent: #2f9bf5;
-  --ce-accent-dim: rgba(47, 155, 245, 0.35);
-  --ce-muted-red: #f0555f;
-  --ce-panel: #272727;
-  --ce-panel-2: #26262c;
-  --ce-panel-3: #343434;
-  --ce-line: rgba(255, 255, 255, 0.10);
-  --ce-text: #eaeaef;
-  --ce-dim: #8b8b96;
-
-  /* Every emoji-bearing element uses this one stack. It is deliberately long:
-     Brave's fingerprinting protection restricts which fonts a page may
-     resolve, and a short stack that misses leaves you with empty boxes. The
-     generic `emoji` family at the end asks the browser for whatever it
-     considers the system emoji font, which survives that restriction. */
-  --ce-emoji-font: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
-    "Noto Color Emoji", "Twemoji Mozilla", "EmojiOne Color", "Android Emoji",
-    "JoyPixels", emoji, sans-serif;
+  --ce-panel: var(--color-surface, #272727);
+  --ce-panel-2: var(--color-surface-100, #343434);
+  --ce-panel-3: var(--color-surface-200, #424242);
+  --ce-text: var(--color-text, #eaeaef);
+  --ce-dim: var(--color-muted, #8b8b96);
+  --ce-line: var(--color-border, rgba(255, 255, 255, 0.12));
+  --ce-accent: var(--color-accent, #2f9bf5);
 }
 
-/* ---------------------------------------------------------------- volume -- */
+.ce-composer { position: relative; }
 
-/* The card is position:relative already, but assert it so the bar can anchor
-   to the bottom edge even if Chatto changes its own layout classes. */
-.ce-card {
+.ce-header-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.ce-settings-trigger[aria-expanded="true"] { color: var(--color-action, var(--ce-accent)); }
+.ce-settings-popover {
+  position: fixed;
+  z-index: 2147483646;
+  display: flex;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--ce-text) 10%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface, var(--ce-panel));
+  color: var(--ce-text);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / .32), 0 8px 10px -6px rgb(0 0 0 / .32);
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+}
+.ce-settings-popover .menu-section {
+  box-sizing: border-box;
+  border-radius: 6px;
+  background: var(--color-background, #171717);
+}
+.ce-settings-header { display: flex; align-items: center; gap: 10px; padding: 10px; }
+.ce-settings-logo { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; }
+.ce-settings-heading { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.ce-settings-heading strong { color: var(--color-text-top, var(--ce-text)); font-size: 14px; }
+.ce-settings-heading span { color: var(--ce-dim); font-size: 11px; }
+.ce-settings-features { padding: 4px; }
+.ce-settings-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 4px; }
+.ce-settings-tab {
+  min-width: 0;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ce-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ce-settings-tab:hover, .ce-settings-tab[aria-selected="true"] {
+  background: var(--color-surface, var(--ce-panel));
+  color: var(--ce-text);
+}
+.ce-settings-content { max-height: min(55vh, 430px); overflow-y: auto; padding: 4px; }
+.ce-setting-row {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ce-text);
+  text-align: left;
+  cursor: pointer;
+}
+.ce-setting-row:hover { background: var(--color-surface, var(--ce-panel)); }
+.ce-setting-row:focus-visible { outline: 2px solid var(--color-action, var(--ce-accent)); outline-offset: -2px; }
+.ce-setting-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.ce-setting-title { color: var(--color-text-top, var(--ce-text)); font-weight: 600; }
+.ce-setting-description { overflow: hidden; color: var(--ce-dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.ce-switch-track {
   position: relative;
-  padding-bottom: 14px !important;
+  width: 34px;
+  height: 20px;
+  flex: 0 0 34px;
+  border-radius: 999px;
+  background: var(--color-surface-strong, #4a4a4a);
+  transition: background-color .15s ease;
 }
-
-.ce-vol {
+.ce-switch-thumb {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 0 6px 4px;
-  pointer-events: auto;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-text, #eee);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .35);
+  transition: transform .15s ease;
+}
+.ce-setting-row[aria-checked="true"] .ce-switch-track { background: var(--color-action, var(--ce-accent)); }
+.ce-setting-row[aria-checked="true"] .ce-switch-thumb { transform: translateX(14px); }
+.ce-settings-footer { padding: 7px 10px; color: var(--ce-dim); font-size: 10px; text-align: center; }
+.ce-library-search, .ce-library-input, .ce-library-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  outline: 0;
+  background: var(--color-surface, #242424);
+  color: var(--ce-text);
+  font: inherit;
+}
+.ce-library-search, .ce-library-input { min-height: 32px; padding: 6px 9px; }
+.ce-library-textarea { min-height: 70px; resize: vertical; padding: 8px 9px; }
+.ce-library-search:focus, .ce-library-input:focus, .ce-library-textarea:focus {
+  outline: 2px solid var(--color-action, var(--ce-accent));
+  outline-offset: -2px;
+}
+.ce-library-list { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.ce-library-empty, .ce-library-hint { margin: 0; padding: 18px 8px; color: var(--ce-dim); font-size: 11px; text-align: center; }
+.ce-library-hint { padding: 8px 5px 3px; }
+.ce-library-item-row, .ce-template-row, .ce-collection-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  background: transparent;
+}
+.ce-library-item-row:hover, .ce-template-row:hover, .ce-collection-row:hover { background: var(--color-surface, var(--ce-panel)); }
+.ce-library-item { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; padding: 7px 8px; color: inherit; text-decoration: none; }
+.ce-library-item-title { overflow: hidden; color: var(--color-text-top, var(--ce-text)); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ce-library-item-text { overflow: hidden; color: var(--ce-text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.ce-library-item-meta { overflow: hidden; color: var(--ce-dim); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.ce-library-remove {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ce-dim);
+  font: 18px/1 inherit;
+  cursor: pointer;
+}
+.ce-library-remove:hover { background: var(--color-surface-emphasized, #333); color: var(--ce-text); }
+.ce-template-form { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.ce-library-primary, .ce-library-insert {
+  min-height: 30px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--color-action, var(--ce-accent));
+  color: white;
+  font: 600 11px inherit;
+  cursor: pointer;
+}
+.ce-template-form .ce-library-primary { align-self: flex-end; padding: 0 12px; }
+.ce-template-row { min-height: 44px; padding: 5px 5px 5px 8px; }
+.ce-template-row .ce-setting-copy { overflow: hidden; }
+.ce-library-insert { min-height: 28px; padding: 0 8px; }
+.ce-collection-create { display: flex; gap: 4px; }
+.ce-collection-create .ce-library-input { min-width: 0; flex: 1; }
+.ce-library-add { flex: 0 0 auto; padding: 0 12px; }
+.ce-collection-row { min-height: 36px; padding: 5px 7px; }
+.ce-collection-row > :first-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ce-count { color: var(--ce-dim); font-size: 11px; }
+
+.ce-gif-btn svg { display: block; width: 15px; height: 15px; }
+.ce-gif-btn.ce-open { color: var(--color-action, var(--ce-accent)); }
+.ce-template-icon { display: block; font-size: 15px; }
+.ce-template-btn[aria-expanded="true"] { color: var(--color-action, var(--ce-accent)); }
+.ce-gif-native-wrap.ce-gif-float {
+  position: absolute;
+  right: 42px;
+  bottom: 8px;
   z-index: 2;
 }
 
-.ce-vol-track {
-  position: relative;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  cursor: pointer;
-  transition: height 0.12s ease, background 0.12s ease;
-}
-
-/* The bar stays visually thin but is much easier to hit: this invisible
-   pad extends the pointer target well above and below it. Without it you
-   were aiming at a 4px line. */
-.ce-vol-track::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -11px;
-  bottom: -6px;
-}
-
-.ce-card:hover .ce-vol-track,
-.ce-vol.ce-dragging .ce-vol-track {
-  height: 8px;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.ce-vol-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 100%;
-  border-radius: 999px;
-  background: var(--ce-accent);
-  transition: background 0.12s ease;
-}
-
-.ce-vol-knob {
-  position: absolute;
-  top: 50%;
-  left: 100%;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-  transform: translateY(-50%) scale(0);
-  transition: transform 0.12s ease;
-  pointer-events: none;
-}
-
-.ce-card:hover .ce-vol-knob,
-.ce-vol.ce-dragging .ce-vol-knob {
-  transform: translateY(-50%) scale(1);
-}
-
-/* Muted reads as a different state, not just a short bar. */
-.ce-vol.ce-muted .ce-vol-fill {
-  background: var(--ce-muted-red);
-}
-
-.ce-vol.ce-muted .ce-vol-track {
-  background: rgba(240, 85, 95, 0.18);
-}
-
-/* Percentage readout, only while the card is hovered or being dragged. */
-/* Chatto's own per-person actions (mute / volume) sit at the TOP-RIGHT of the
-   card and appear on hover. Anchoring the readout left keeps the two apart. */
-.ce-vol-badge {
-  position: absolute;
-  left: 6px;
-  bottom: 12px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(10, 10, 14, 0.92);
-  border: 1px solid var(--ce-line);
-  color: var(--ce-text);
-  font: 600 10.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  opacity: 0;
-  transform: translateY(3px);
-  transition: opacity 0.12s ease, transform 0.12s ease;
-  pointer-events: none;
-}
-
-.ce-card:hover .ce-vol-badge,
-.ce-vol.ce-dragging .ce-vol-badge {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.ce-vol.ce-muted .ce-vol-badge {
-  color: #ff9aa0;
-}
-
-.ce-vol-reset-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--ce-line, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
-  background: var(--ce-panel, #272727);
-  color: var(--ce-dim, #8b8b96);
-  font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-  cursor: pointer;
-}
-
-.ce-vol-reset-btn:hover {
-  background: var(--ce-panel-3, #343434);
-  color: var(--ce-text, #eaeaef);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ce-vol-track,
-  .ce-vol-knob,
-  .ce-vol-badge,
-  .ce-vol-fill {
-    transition: none;
-  }
-}
-
-/* --------------------------------------------------------- local nickname --
-   .ce-nick-label copies Chatto's own class list for the name it replaces, so
-   it inherits that element's sizing/truncation for free — this rule only
-   needs to hide the original. */
-.ce-name-hidden {
-  display: none !important;
-}
-
-/* ----------------------------------------------------------- emoji button -- */
-
-.ce-emoji-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ce-dim);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: color 0.1s ease, background 0.1s ease, scale 0.1s ease;
-}
-
-.ce-emoji-btn:hover {
-  color: var(--ce-text);
-}
-
-.ce-emoji-btn:active {
-  scale: 0.94;
-}
-
-.ce-emoji-btn.ce-open {
-  color: var(--ce-accent);
-  background: rgba(47, 155, 245, 0.12);
-}
-
-.ce-emoji-btn svg {
-  width: 21px;
-  height: 21px;
-  display: block;
-}
-
-.ce-emoji-btn:focus-visible {
-  outline: 2px solid var(--ce-accent);
-  outline-offset: 1px;
-}
-
-/* ----------------------------------------------------------- emoji picker -- */
-
-.ce-pick {
+.ce-gif-picker {
   position: fixed;
-  z-index: 2147483000;
+  z-index: 2147483646;
+  display: flex;
   width: 352px;
-  max-width: calc(100vw - 24px);
-  display: flex;
+  max-width: calc(100vw - 20px);
   flex-direction: column;
-  background: var(--ce-panel);
-  border: 1px solid var(--ce-line);
-  border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
-  overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-  color: var(--ce-text);
-  animation: ce-pop 0.13s ease-out;
-}
-
-@keyframes ce-pop {
-  from { opacity: 0; transform: translateY(6px) scale(0.985); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ce-pick { animation: none; }
-}
-
-.ce-pick-tabs {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  padding: 6px 6px 0;
-  border-bottom: 1px solid var(--ce-line);
-}
-
-.ce-tab {
-  flex: 1;
-  height: 30px;
-  border: none;
-  background: transparent;
-  border-radius: 6px 6px 0 0;
-  font-size: 15px;
-  line-height: 1;
-  /* Was missing entirely: these buttons contain emoji but inherited the UI
-     sans-serif stack, so on any system where that font has no emoji coverage
-     the category tabs rendered as blank boxes. */
-  font-family: var(--ce-emoji-font);
-  font-variant-emoji: emoji;
-  cursor: pointer;
-  opacity: 0.5;
-  filter: grayscale(0.35);
-  transition: opacity 0.1s ease, background 0.1s ease;
-  border-bottom: 2px solid transparent;
-}
-
-.ce-tab:hover { opacity: 0.85; background: rgba(255, 255, 255, 0.05); }
-
-.ce-tab.ce-tab-on {
-  opacity: 1;
-  filter: none;
-  border-bottom-color: var(--ce-accent);
-}
-
-.ce-pick-search {
-  padding: 8px 10px;
-}
-
-.ce-pick-search input {
-  width: 100%;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 7px;
-  border: 1px solid var(--ce-line);
-  background: rgba(0, 0, 0, 0.28);
-  color: var(--ce-text);
-  font-size: 12.5px;
-  font-family: inherit;
-  outline: none;
-}
-
-.ce-pick-search input::placeholder { color: var(--ce-dim); }
-
-.ce-pick-search input:focus {
-  border-color: var(--ce-accent);
-  box-shadow: 0 0 0 3px rgba(47, 155, 245, 0.14);
-}
-
-.ce-pick-body {
-  height: 264px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 0 6px 8px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.ce-pick-body::-webkit-scrollbar { width: 8px; }
-.ce-pick-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 99px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-
-.ce-sec-title {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 8px 6px 5px;
-  background: var(--ce-panel);
-  color: var(--ce-dim);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.ce-sec-grid {
-  display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  gap: 1px;
-  /* 1,898 buttons go into the DOM in one write. This lets the browser skip
-     layout and paint for the sections that are scrolled out of view, which
-     takes the picker's first paint from visibly janky to instant. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 300px;
-}
-
-.ce-em {
-  height: 34px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  font-size: 21px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.08s ease, scale 0.08s ease;
-  font-family: var(--ce-emoji-font);
-  /* Forces colour presentation for the ~60 bundled emoji whose codepoint
-     defaults to monochrome TEXT presentation. */
-  font-variant-emoji: emoji;
-}
-
-.ce-em:hover, .ce-em:focus-visible {
-  background: rgba(255, 255, 255, 0.10);
-  outline: none;
-  scale: 1.12;
-}
-
-.ce-pick-empty {
-  padding: 40px 12px;
-  text-align: center;
-  color: var(--ce-dim);
-  font-size: 12.5px;
-}
-
-.ce-pick-foot {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 11px;
-  border-top: 1px solid var(--ce-line);
-  background: rgba(0, 0, 0, 0.18);
-  min-height: 34px;
-}
-
-.ce-foot-em {
-  font-size: 19px;
-  line-height: 1;
-  font-family: var(--ce-emoji-font);
-  font-variant-emoji: emoji;
-}
-
-.ce-foot-name {
-  font-size: 11.5px;
-  color: var(--ce-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-
-/* ------------------------------------------- emoji button, float fallback --
-   Used only when no strategy located the send button — a renamed testid, or a
-   localised aria-label. The button parks itself in the corner of the composer
-   rather than not appearing at all. */
-
-.ce-composer {
-  position: relative;
-}
-
-.ce-emoji-btn.ce-emoji-float {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  z-index: 20;
-  background: rgba(20, 20, 26, 0.6);
-  backdrop-filter: blur(4px);
-}
-
-.ce-emoji-btn.ce-emoji-float:hover {
-  background: rgba(40, 40, 50, 0.85);
-}
-
-/* -------------------------------------------------------------- GIF button --
-   Same box model as the emoji button, so the two sit flush together. */
-
-.ce-gif-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ce-dim);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: color 0.1s ease, background 0.1s ease, scale 0.1s ease;
-}
-
-.ce-gif-btn:hover { color: var(--ce-text); }
-.ce-gif-btn:active { scale: 0.94; }
-
-.ce-gif-btn.ce-open {
-  color: var(--ce-accent);
-  background: rgba(47, 155, 245, 0.12);
-}
-
-.ce-gif-btn svg {
-  width: 21px;
-  height: 21px;
-  display: block;
-}
-
-.ce-gif-btn:focus-visible {
-  outline: 2px solid var(--ce-accent);
-  outline-offset: 1px;
-}
-
-/* ------------------------------------------------------------ rename field --
-   Inline nickname editor shown under the Rename button, inside Chatto's own
-   profile popover, in place of a native window.prompt(). */
-
-.ce-rename-field {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px 8px;
-}
-
-.ce-rename-input {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ce-line, rgba(255, 255, 255, 0.1));
-  background: rgba(0, 0, 0, 0.28);
-  color: var(--ce-text, #eaeaef);
-  font-size: 12.5px;
-  font-family: inherit;
-  outline: none;
-}
-
-.ce-rename-input::placeholder { color: var(--ce-dim, #8b8b96); }
-
-.ce-rename-input:focus {
-  border-color: var(--ce-accent, #2f9bf5);
-  box-shadow: 0 0 0 3px rgba(47, 155, 245, 0.14);
-}
-
-.ce-rename-confirm {
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 6px;
-  background: var(--ce-accent, #2f9bf5);
-  color: #fff;
-  cursor: pointer;
-}
-
-.ce-rename-confirm:hover { filter: brightness(1.1); }
-.ce-rename-confirm:active { transform: translateY(0.5px); }
-
-/* -------------------------------------------------------------- GIF picker --
-   Reuses .ce-pick / .ce-pick-search / .ce-pick-body / .ce-pick-empty / .ce-tab
-   from the emoji picker for the outer chrome, so the two pickers feel like
-   one family. Only the results grid, favorite star, and tab-label font reset
-   are GIF-specific. */
-
-.ce-gif-pick { width: 320px; }
-
-.ce-gif-search { flex: 1; }
-
-.ce-gif-body { height: 320px; }
-
-.ce-gif-tabs { padding: 6px 6px 0; }
-
-/* .ce-tab defaults to the emoji font stack for the category glyphs — these
-   tabs are plain text labels ("GIFs", "★ Favorites") and read oddly forced
-   through it, so reset back to the UI font. */
-.ce-gif-tab {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-  font-variant-emoji: normal;
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.ce-gif-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-  padding: 2px;
-}
-
-.ce-gif-item {
-  position: relative;
-  height: 100px;
-  border: none;
-  border-radius: 8px;
-  overflow: hidden;
-  padding: 0;
-  background: rgba(0, 0, 0, 0.3);
-  cursor: pointer;
-}
-
-.ce-gif-item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.ce-gif-item:hover, .ce-gif-item:focus-visible {
-  outline: 2px solid var(--ce-accent);
-  outline-offset: -2px;
-}
-
-.ce-gif-star {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  padding: 0;
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s ease, color 0.1s ease, transform 0.1s ease;
-}
-
-.ce-gif-item:hover .ce-gif-star,
-.ce-gif-item:focus-within .ce-gif-star,
-.ce-gif-star.ce-gif-star-on {
-  opacity: 1;
-}
-
-.ce-gif-star:hover { transform: scale(1.12); }
-
-.ce-gif-star.ce-gif-star-on {
-  color: #f5c518;
-}
-
-.ce-gif-item.ce-gif-loading {
-  opacity: 0.5;
-  cursor: wait;
-}
-
-/* ============================================================ markdown bar --
-   Docked directly above its composer, in normal document flow — always
-   visible, like a native app's own formatting toolbar, rather than a popup
-   positioned against the selection's rect.
-
-   Uses the synced --ce-* palette so it follows both Chatto's default theme
-   and any Chatto Enhancer custom theme. */
-
-.ce-md {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+  gap: 4px;
   padding: 4px;
-  margin-bottom: 4px;
-  background: var(--ce-panel, #272727);
-  border: 1px solid var(--ce-line, rgba(255, 255, 255, 0.1));
-  border-radius: 10px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ce-text) 10%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface, var(--ce-panel));
+  color: var(--ce-text);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / .32), 0 8px 10px -6px rgb(0 0 0 / .32);
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
 }
-
-.ce-md-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 28px;
-  padding: 0;
+.ce-gif-picker .menu-section {
+  box-sizing: border-box;
+  border-radius: 6px;
+  background: var(--color-background, #171717);
+}
+.ce-gif-tabs { display: flex; gap: 4px; padding: 4px; }
+.ce-gif-tab {
+  flex: 1;
+  min-height: 32px;
+  padding: 5px 9px;
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--ce-dim, #8b8b96);
-  font: 600 14px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  color: var(--ce-dim);
+  font: 600 12px inherit;
   cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
 }
-
-.ce-md-btn:hover {
-  background: var(--ce-panel-3, #343434);
-  color: var(--ce-text, #eaeaef);
+.ce-gif-tab:hover { background: var(--color-surface, var(--ce-panel)); color: var(--ce-text); }
+.ce-gif-tab.ce-active { background: var(--color-surface, var(--ce-panel)); color: var(--ce-text); }
+.ce-gif-search { display: flex; gap: 4px; padding: 4px; }
+.ce-gif-search input, .ce-gif-collection {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  outline: 0;
+  background: var(--color-surface, #242424);
+  color: var(--ce-text);
+  font: inherit;
 }
-
-.ce-md-btn:active {
-  transform: translateY(0.5px);
-  color: var(--ce-accent, #2f9bf5);
+.ce-gif-collection { width: 42%; cursor: pointer; }
+.ce-gif-search input:focus { outline: 2px solid var(--color-action, var(--ce-accent)); outline-offset: -2px; }
+.ce-gif-search input::placeholder { color: var(--ce-dim); }
+.ce-gif-results { padding: 4px; }
+.ce-gif-body { height: 320px; overflow: auto; }
+.ce-gif-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.ce-gif-item {
+  position: relative;
+  height: 105px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ce-panel-2);
+  cursor: pointer;
 }
-
-.ce-md-btn:focus-visible {
-  outline: 2px solid var(--ce-accent, #2f9bf5);
-  outline-offset: -1px;
+.ce-gif-item img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ce-gif-item:hover, .ce-gif-item:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: -2px; }
+.ce-gif-item.ce-loading { opacity: .55; cursor: wait; }
+.ce-gif-star {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .62);
+  color: rgba(255, 255, 255, .62);
+  cursor: pointer;
+  opacity: 0;
 }
+.ce-gif-item:hover .ce-gif-star, .ce-gif-star:focus-visible, .ce-gif-star.ce-gif-star-on { opacity: 1; }
+.ce-gif-star.ce-gif-star-on { color: #f5c518; }
+.ce-gif-empty { margin: 30px 8px; color: var(--ce-dim); text-align: center; }
+.ce-gif-credit { padding: 1px 6px 2px; color: var(--ce-dim); font-size: 10px; text-align: right; }
 
-.ce-md-btn svg {
-  width: 16px;
-  height: 16px;
+.ce-template-picker {
+  position: fixed;
+  z-index: 2147483646;
+  display: flex;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--ce-text) 10%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface, var(--ce-panel));
+  color: var(--ce-text);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / .32), 0 8px 10px -6px rgb(0 0 0 / .32);
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
 }
-
-/* While dragging a selection that started in the message box, keep every
-   element selectable so crossing out of the composer doesn't collapse it.
-   Applied only for the duration of the drag. */
-html.ce-selecting,
-html.ce-selecting * {
-  -webkit-user-select: text !important;
-  user-select: text !important;
+.ce-template-picker .menu-section { border-radius: 6px; background: var(--color-background, #171717); }
+.ce-template-search, .ce-template-picker-body, .ce-template-manage-wrap { padding: 4px; }
+.ce-template-picker-list { display: flex; max-height: 280px; flex-direction: column; gap: 3px; overflow-y: auto; }
+.ce-template-choice {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ce-text);
+  text-align: left;
+  cursor: pointer;
 }
+.ce-template-choice:hover { background: var(--color-surface, var(--ce-panel)); }
+.ce-template-manage { width: 100%; min-height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--ce-dim); cursor: pointer; }
+.ce-template-manage:hover { background: var(--color-surface, var(--ce-panel)); color: var(--ce-text); }
 
-/* A format already applied at the selection (only known on the direct-editor
-   path; the typing fallback cannot ask). */
-.ce-md-btn.ce-on {
-  background: var(--ce-panel-3, #343434);
-  color: var(--ce-accent, #2f9bf5);
+.ce-name-hidden { display: none !important; }
+.ce-rename-field {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
 }
-
-/* The letter buttons carry their meaning visually rather than as an icon. */
-.ce-md-bold    { font-weight: 800; }
-.ce-md-italic  { font-family: Georgia, "Times New Roman", serif; font-style: italic; }
-.ce-md-strike  { text-decoration: line-through; text-decoration-thickness: 1.5px; }
-.ce-md-heading { font-weight: 700; }
-
-/* Group separators: inline / block / code / link. */
-.ce-md-sep {
-  width: 1px;
-  height: 18px;
-  margin: 0 3px;
-  background: var(--ce-line, rgba(255, 255, 255, 0.1));
-  flex: 0 0 auto;
+.ce-rename-input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid var(--ce-line);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--color-background, #202020);
+  color: var(--ce-text);
+  font: inherit;
 }
-
-.ce-md-sep:first-child {
-  display: none;
+.ce-rename-input:focus { border-color: var(--ce-accent); }
+.ce-rename-save {
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--ce-accent);
+  color: white;
+  font: 600 12px inherit;
+  cursor: pointer;
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .ce-md-btn { transition: none; }
+.ce-profile-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
 }
+.ce-profile-field { display: flex; flex-direction: column; gap: 4px; color: var(--ce-dim); font-size: 10px; }
+.ce-profile-textarea, .ce-profile-tags-input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--ce-line);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--color-surface, #242424);
+  color: var(--ce-text);
+  font: 12px inherit;
+}
+.ce-profile-textarea { min-height: 62px; resize: vertical; padding: 7px; }
+.ce-profile-tags-input { min-height: 30px; padding: 5px 7px; }
+.ce-profile-textarea:focus, .ce-profile-tags-input:focus { border-color: var(--color-action, var(--ce-accent)); }
+.ce-profile-editor .ce-rename-save { align-self: flex-end; min-height: 28px; }
+.ce-user-note-section { padding: 9px 10px; }
+.ce-user-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.ce-user-tag { padding: 2px 6px; border-radius: 999px; background: color-mix(in srgb, var(--color-action, var(--ce-accent)) 18%, transparent); color: var(--color-action, var(--ce-accent)); font-size: 10px; }
+.ce-user-note { margin: 6px 0 0; color: var(--ce-dim); font-size: 11px; line-height: 1.4; white-space: pre-wrap; }
